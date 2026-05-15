@@ -49,3 +49,12 @@ class LLMProvider(Protocol):
     def count_tokens(self, text: str) -> int:
         """Estimate token count for *text*.  May be approximate."""
         ...
+
+    def count_message_tokens(self, messages: list[Message]) -> int:
+        """Estimate token count for a full message list.
+
+        Serialises role, content, tool_calls, and tool_call_id fields before
+        counting.  Significantly more accurate than counting raw text alone
+        because it includes per-message role overhead.
+        """
+        ...

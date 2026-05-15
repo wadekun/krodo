@@ -162,6 +162,62 @@ class LiteLLMProvider:
             # Rough fallback: 1 token ≈ 4 chars
             return max(1, len(text) // 4)
 
+    def count_message_tokens(self, messages: list[Message]) -> int:
+        """Estimate token count for a full message list.
+
+        Serialises each message's role, content, tool_calls and tool_call_id
+        into a plain text representation and counts tokens via tiktoken.
+        The +4 per-message overhead approximates the role/separator tokens
+        that OpenAI and compatible APIs insert around each message.
+        """
+        try:
+            import tiktoken
+
+            enc = tiktoken.encoding_for_model("gpt-4o")
+        except Exception:  # noqa: BLE001
+            enc = None
+
+        total = 0
+        for msg in messages:
+            # Per-message overhead (role + separators ≈ 4 tokens)
+            total += 4
+
+            # Content
+            if isinstance(msg.content, str):
+                text = msg.content
+            else:
+                text = " ".join(
+                    str(part.get("text") or part.get("content") or "") for part in msg.content
+                )
+            total += self._encode_text(enc, text)
+
+            # tool_call_id (tool result messages)
+            if msg.tool_call_id:
+                total += self._encode_text(enc, msg.tool_call_id)
+
+            # tool_calls (assistant messages)
+            if msg.tool_calls:
+                for tc in msg.tool_calls:
+                    total += self._encode_text(enc, tc.name)
+                    total += self._encode_text(enc, json.dumps(tc.arguments))
+
+        return total
+
+    @staticmethod
+    def _encode_text(enc: object, text: str) -> int:
+        """Encode *text* with *enc* (tiktoken Encoding) or fall back to char/4."""
+        if enc is None:
+            return max(1, len(text) // 4)
+        try:
+            # tiktoken Encoding objects have an encode() method; use getattr to
+            # satisfy strict mypy while avoiding a hard tiktoken import here.
+            encode_fn = getattr(enc, "encode", None)
+            if encode_fn is None:
+                return max(1, len(text) // 4)
+            return len(encode_fn(text))
+        except Exception:  # noqa: BLE001
+            return max(1, len(text) // 4)
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------

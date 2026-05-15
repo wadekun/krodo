@@ -259,3 +259,58 @@ def test_count_tokens_returns_positive_int() -> None:
     n = provider.count_tokens("Hello world, this is a test sentence.")
     assert isinstance(n, int)
     assert n > 0
+
+
+# ---------------------------------------------------------------------------
+# count_message_tokens
+# ---------------------------------------------------------------------------
+
+
+def test_count_message_tokens_single_user_message() -> None:
+    provider = LiteLLMProvider(model="anthropic/claude-test")
+    msgs = [Message(role="user", content="Hello world")]
+    n = provider.count_message_tokens(msgs)
+    assert isinstance(n, int)
+    assert n > 0
+
+
+def test_count_message_tokens_with_tool_calls() -> None:
+    provider = LiteLLMProvider(model="anthropic/claude-test")
+    msgs = [
+        Message(role="user", content="Do something"),
+        Message(
+            role="assistant",
+            content="",
+            tool_calls=[ToolCall(id="tc1", name="read_file", arguments={"path": "foo.py"})],
+        ),
+    ]
+    n = provider.count_message_tokens(msgs)
+    assert n > provider.count_message_tokens([Message(role="user", content="Do something")])
+
+
+def test_count_message_tokens_with_tool_result() -> None:
+    provider = LiteLLMProvider(model="anthropic/claude-test")
+    msgs = [
+        Message(role="tool", content="file contents here", tool_call_id="tc1"),
+    ]
+    n = provider.count_message_tokens(msgs)
+    assert n > 0
+
+
+def test_count_message_tokens_list_content() -> None:
+    provider = LiteLLMProvider(model="anthropic/claude-test")
+    msgs = [
+        Message(role="user", content=[{"type": "text", "text": "hello"}, {"type": "text", "text": "world"}]),
+    ]
+    n = provider.count_message_tokens(msgs)
+    assert n > 0
+
+
+def test_count_message_tokens_multiple_messages_larger_than_single() -> None:
+    provider = LiteLLMProvider(model="anthropic/claude-test")
+    single = [Message(role="user", content="Hello")]
+    multi = [
+        Message(role="user", content="Hello"),
+        Message(role="assistant", content="Hi there, how can I help?"),
+    ]
+    assert provider.count_message_tokens(multi) > provider.count_message_tokens(single)
