@@ -79,6 +79,64 @@ M2 extended the 3 M1 tools to a full set of 11:
   - Pattern rules stored in memory; persisted to SQLite in M5.
 - `full_auto` — all tools auto-approved; red warning banner printed at startup.
 
+## M3: Token budget, dual compression, and error recovery (Phase 1 M3)
+
+M3 brings context-window safety and centralised error recovery to the agent loop.
+
+### Token budget (§3.4.1)
+
+`src/coda/core/budget.py` — `BudgetCalculator`:
+- Total budget = model context window × 0.80
+- Output reserve = total_budget × 0.15
+- `check(messages)` → `BudgetStatus(action: BudgetAction)`: OK / COMPRESS / TRUNCATE / REFUSE
+- `MODEL_CONTEXT_WINDOW` table covers ~20 common models (conservative 95% values)
+- `CODA_TOKEN_RATIO` env var overrides the per-model ratio (Claude = 1.1× default)
+
+### Dual compression (`CODA_COMPRESS`)
+
+`src/coda/core/compression.py` — `make_compressor(strategy, provider)`:
+- `llm` (default): calls the same LLMProvider to summarise oldest N rounds into a `<SUMMARY>` block; emits `SessionEvent(COMPRESSION)` with cost.
+- `algorithmic`: drops `tool_result` content; keeps tool-call metadata + file paths; zero extra LLM cost.
+- **Pinned context**: most-recent 5 file paths from tool_call args + last user message are **never** compressed.
+- Compression is triggered before each `provider.chat()` call (§4.9 of M3 plan).
+
+### Error recovery (`src/coda/core/recovery.py`)
+
+`handle(RecoveryContext) -> (RecoveryAction, str)` dispatches 7 scenarios:
+
+| # | `error_kind` | `RecoveryAction` | Behaviour |
+|---|-------------|-----------------|-----------|
+| 1 | `bad_json` | RETRY / ABORT | Re-inject schema+error; retry ×2 |
+| 2 | `tool_timeout` | SKIP | Kill; inject partial-result stub |
+| 3 | `stall` | ABORT | Print last 3 calls; abort turn |
+| 4 | `context_loss` | RETRY | Re-inject pinned file paths |
+| 5 | `sha256_conflict` | SKIP | Block write; ask for re-read |
+| 6 | `provider_error` | RETRY / ABORT | Exp backoff 1s/2s/4s ×3 |
+| 7 | `eacces` | SKIP | Report path + permission bits |
+
+`StallDetector`: tracks write-tool-call signatures; raises `StallError` at 3 consecutive identical calls (read-only tools excluded).
+
+### SHA-256 conflict detection (scenario 5)
+
+`read_file` caches the SHA-256 of the file at read-time in a module-level `_sha256_cache`.  `edit_file` and `apply_patch` validate the cache before writing; if the on-disk hash differs, they return an error message asking the agent to re-read the file.
+
+### SessionEvent stream (`src/coda/core/events.py`)
+
+`SessionEventLogger` wraps the existing JSONL logger with:
+- Typed `emit(SessionEventType, data)` → `SessionEvent`
+- `emit_from(event)` — for compressor-generated events (overwrites session_id + seq)
+- Monotonically-increasing `seq` counter
+- JSONL path: `<workspace>/.coda/logs/<session_id>.jsonl`
+- Factory: `SessionEventLogger.from_workspace_path(session_id, workspace_root)`
+
+Events emitted by AgentLoop: `USER_MESSAGE`, `ASSISTANT_MESSAGE`, `TOOL_CALL`, `APPROVAL_DECISION`, `TOOL_RESULT`, `COMPRESSION`, `ERROR`.
+
+### New CLI flags (M3)
+
+- `--max-tool-calls N` — tool calls per turn limit (default 15)
+- `--summary-window N` — dialogue rounds to compress in one pass (default 2)
+- Startup banner now shows: model context window / compression strategy / max tool calls
+
 ## When you (the agent) modify this codebase
 
 - Always `read_file` before `edit_file` — never guess file contents.

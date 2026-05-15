@@ -300,7 +300,10 @@ def test_count_message_tokens_with_tool_result() -> None:
 def test_count_message_tokens_list_content() -> None:
     provider = LiteLLMProvider(model="anthropic/claude-test")
     msgs = [
-        Message(role="user", content=[{"type": "text", "text": "hello"}, {"type": "text", "text": "world"}]),
+        Message(
+            role="user",
+            content=[{"type": "text", "text": "hello"}, {"type": "text", "text": "world"}],
+        ),
     ]
     n = provider.count_message_tokens(msgs)
     assert n > 0

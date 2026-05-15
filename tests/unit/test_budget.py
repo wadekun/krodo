@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
+from pydantic import BaseModel
 
 from coda.core.budget import (
     BudgetAction,
@@ -14,8 +13,6 @@ from coda.core.budget import (
     get_context_window,
 )
 from coda.core.types import Message, ToolDef
-from pydantic import BaseModel
-
 
 # ---------------------------------------------------------------------------
 # Helpers

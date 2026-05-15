@@ -6,11 +6,14 @@ Usage::
     coda --root /path/to/project "add docstrings to src/main.py"
 
 Environment variables:
-    CODA_ROOT         override workspace root (lowest priority after --root)
-    CODA_MODEL        LiteLLM model string, e.g. anthropic/claude-3-5-sonnet
-    CODA_API_KEY      forwarded to LiteLLM as api_key
-    CODA_API_BASE     forwarded to LiteLLM as api_base (custom endpoint)
-    CODA_APPROVAL     approval mode: read_only | auto_edit | full_auto
+    CODA_ROOT           override workspace root (lowest priority after --root)
+    CODA_MODEL          LiteLLM model string, e.g. anthropic/claude-3-5-sonnet
+    CODA_API_KEY        forwarded to LiteLLM as api_key
+    CODA_API_BASE       forwarded to LiteLLM as api_base (custom endpoint)
+    CODA_APPROVAL       approval mode: read_only | auto_edit | full_auto
+    CODA_COMPRESS       compression strategy: llm (default) | algorithmic
+    CODA_TOKEN_RATIO    token ratio multiplier for non-GPT models (default 1.0,
+                        Claude 1.1×)
 """
 
 from __future__ import annotations
@@ -21,6 +24,10 @@ from pathlib import Path
 import typer
 
 from coda.cli.banner import print_banner
+from coda.core.budget import BudgetCalculator, get_context_window
+from coda.core.compression import make_compressor
+from coda.core.context import InMemoryContextManager
+from coda.core.events import SessionEventLogger
 from coda.core.loop import AgentLoop, LoopConfig
 from coda.core.workspace import LocalWorkspaceResolver
 from coda.llm.litellm_provider import LiteLLMProvider
@@ -86,6 +93,19 @@ def main(
         ),
         envvar="CODA_APPROVAL",
     ),
+    max_tool_calls: int = typer.Option(
+        15,
+        "--max-tool-calls",
+        help="Maximum tool calls per turn before the loop aborts.",
+    ),
+    summary_window: int = typer.Option(
+        2,
+        "--summary-window",
+        help=(
+            "Number of dialogue rounds to compress in one pass "
+            "(used by LLM and algorithmic compressors)."
+        ),
+    ),
 ) -> None:
     """Run Coda with the given PROMPT."""
     import asyncio
@@ -98,6 +118,8 @@ def main(
             api_key=api_key,
             api_base=api_base,
             approval_mode=approval,
+            max_tool_calls=max_tool_calls,
+            summary_window=summary_window,
         )
     )
 
@@ -109,6 +131,8 @@ async def _async_main(
     api_key: str | None,
     api_base: str | None,
     approval_mode: str,
+    max_tool_calls: int = 15,
+    summary_window: int = 2,
 ) -> None:
     session_id = str(uuid.uuid4())[:8]
 
@@ -137,11 +161,26 @@ async def _async_main(
             )
         )
 
+    # 4b. Compression strategy banner
+    import os
+
+    compress_strategy = os.environ.get("CODA_COMPRESS", "llm")
+    context_window = get_context_window(model)
+    from rich.console import Console as _Console
+
+    _Console(stderr=True).print(
+        f"[dim]Model context window: {context_window:,} tokens | "
+        f"Compression: {compress_strategy} | "
+        f"Max tool calls: {max_tool_calls}[/dim]"
+    )
+
     logger.info(
-        "session_init session_id=%s model=%s approval=%s",
+        "session_init session_id=%s model=%s approval=%s compress=%s window=%d",
         session_id,
         model,
         approval_mode,
+        compress_strategy,
+        context_window,
     )
 
     # 5. Wire up dependencies
@@ -153,6 +192,19 @@ async def _async_main(
         api_key=api_key,
         api_base=api_base,
     )
+
+    # M3: Budget calculator + compressor
+    budget = BudgetCalculator(
+        model=model,
+        count_fn=provider.count_message_tokens,
+    )
+    try:
+        compressor = make_compressor(strategy=compress_strategy, provider=provider)
+    except ValueError:
+        compressor = make_compressor(strategy="algorithmic")
+
+    # M3: Session event logger
+    event_logger = SessionEventLogger.from_workspace_path(session_id, workspace.root)
 
     registry = ToolRegistry()
     # M1 tools
@@ -176,12 +228,21 @@ async def _async_main(
         logger=logger,
     )
 
+    loop_config = LoopConfig(max_tool_calls_per_turn=max_tool_calls)
     loop = AgentLoop(
         provider=provider,
         registry=registry,
         tool_ctx=tool_ctx,
         approval=approval_manager,
-        config=LoopConfig(),
+        config=loop_config,
+        event_logger=event_logger,
+    )
+
+    # Inject budget + compressor into context manager
+    loop.context_manager = InMemoryContextManager(
+        system_prompt=loop_config.system_prompt,
+        budget=budget,
+        compressor=compressor,
     )
 
     # 6. Run

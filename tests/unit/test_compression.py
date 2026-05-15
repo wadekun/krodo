@@ -16,7 +16,6 @@ from coda.core.compression import (
 )
 from coda.core.types import Message, SessionEventType, ToolCall
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -309,9 +308,7 @@ class TestMakeCompressor:
         with pytest.raises(ValueError, match="Unknown compression strategy"):
             make_compressor(strategy="magic")
 
-    def test_default_without_provider_is_algorithmic(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_default_without_provider_is_algorithmic(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("CODA_COMPRESS", raising=False)
         compressor = make_compressor()
         assert isinstance(compressor, AlgorithmicCompressor)
@@ -335,6 +332,7 @@ class TestContextManagerWithCompressor:
         from coda.core.context import InMemoryContextManager
 
         call_count = 0
+
         # First few calls return high usage (over threshold), then low
         def count_fn(msgs: list[Message]) -> int:
             nonlocal call_count

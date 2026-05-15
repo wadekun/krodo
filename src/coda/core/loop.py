@@ -108,7 +108,6 @@ class AgentLoop:
         self._emit(SessionEventType.USER_MESSAGE, content=user_input)
         self._stall.reset()
 
-        messages = self.context_manager.build_messages()
         tool_defs = self._registry.all_defs()
 
         tool_calls_made = 0
@@ -120,6 +119,15 @@ class AgentLoop:
         provider_retry = 0
 
         while True:
+            # ----------------------------------------------------------------
+            # Check token budget before each LLM call (§4.9 of M3 plan)
+            # ----------------------------------------------------------------
+            compression_event = await self.context_manager.compress_if_needed()
+            if compression_event is not None and self._event_logger is not None:
+                self._event_logger.emit_from(compression_event)
+
+            messages = self.context_manager.build_messages()
+
             # ----------------------------------------------------------------
             # LLM call with provider-error recovery
             # ----------------------------------------------------------------
@@ -304,11 +312,7 @@ class AgentLoop:
             if hit_limit or aborted:
                 break
 
-            # Compress context and rebuild messages for next LLM call
-            compression_event = await self.context_manager.compress_if_needed()
-            if compression_event is not None and self._event_logger is not None:
-                self._event_logger.emit_from(compression_event)
-            messages = self.context_manager.build_messages()
+            # Loop back; compression is done at the top of the next iteration.
 
         return TurnResult(
             final_text=final_text,

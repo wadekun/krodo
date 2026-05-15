@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC
 from pathlib import Path
 
 import pytest
 
 from coda.core.events import SessionEventLogger
 from coda.core.types import SessionEvent, SessionEventType
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -112,7 +112,7 @@ class TestSessionEventLoggerJSONL:
         logger = _make_logger(jsonl_path=jsonl)
         for i in range(5):
             logger.emit(SessionEventType.TOOL_RESULT, data={"i": i})
-        lines = [l for l in jsonl.read_text().splitlines() if l.strip()]
+        lines = [ln for ln in jsonl.read_text().splitlines() if ln.strip()]
         assert len(lines) == 5
 
     def test_roundtrip_preserves_all_fields(self, tmp_path: Path) -> None:
@@ -150,7 +150,7 @@ class TestSessionEventLoggerJSONL:
         logger = _make_logger(jsonl_path=jsonl)
         logger.emit(SessionEventType.USER_MESSAGE)
         logger.emit(SessionEventType.ASSISTANT_MESSAGE)
-        lines = [l for l in jsonl.read_text().splitlines() if l.strip()]
+        lines = [ln for ln in jsonl.read_text().splitlines() if ln.strip()]
         assert len(lines) == 2
 
 
@@ -161,7 +161,7 @@ class TestSessionEventLoggerJSONL:
 
 class TestEmitFrom:
     def test_emit_from_overwrites_session_id(self, tmp_path: Path) -> None:
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         jsonl = tmp_path / "events.jsonl"
         logger = _make_logger(session_id="correct-session", jsonl_path=jsonl)
@@ -171,7 +171,7 @@ class TestEmitFrom:
             session_id="wrong-session",
             seq=99,
             type=SessionEventType.COMPRESSION,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             data={"strategy": "algorithmic"},
         )
 
@@ -181,7 +181,7 @@ class TestEmitFrom:
         assert updated.id == "foreign-id"  # id preserved
 
     def test_emit_from_written_to_jsonl(self, tmp_path: Path) -> None:
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         jsonl = tmp_path / "events.jsonl"
         logger = _make_logger(jsonl_path=jsonl)
@@ -191,7 +191,7 @@ class TestEmitFrom:
             session_id="other",
             seq=0,
             type=SessionEventType.COMPRESSION,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             data={"strategy": "llm"},
         )
         logger.emit_from(foreign_event)

@@ -21,14 +21,17 @@ For full design rationale, see [`docs/architecture.md`](docs/architecture.md).
 | Phase | Scope | Status |
 |------:|:------|:------:|
 | 0 | Single-file prototype validating the ReAct loop | ✅ done |
-| 1 | Usable CLI MVP (REPL + headless exec, 11 tools, approval, git safety net) | 🚧 in progress |
+| 1 M1 | Walking skeleton (3 tools, CLI, agent loop) | ✅ done |
+| 1 M2 | Full tools (11 tools) + three approval modes + pattern trust | ✅ done |
+| 1 M3 | Context management (token budget + dual compression) + 7 recovery scenarios | ✅ done |
+| 1 M4 | `.codaignore` + git checkpoint + `coda undo` | — |
 | 2 | tree-sitter symbol index, repo-map, Textual TUI, MCP client | — |
 | 3 | OS-level sandbox, evaluation harness, OpenTelemetry / Langfuse | — |
 | 4 | Production-grade: Rust hot paths, single-binary distribution, LiteLLM Proxy | — |
 
 ## Quick start
 
-### Try the M2 Full Tools (Phase 1 in-progress)
+### Try the M3 release (Phase 1 in-progress)
 
 ```bash
 git clone https://github.com/<org>/coda
@@ -64,6 +67,59 @@ coda --help
 | `run_shell` | Shell | Yes | Execute a shell command inside the workspace sandbox |
 | `git_commit` | Git | Yes | Commit staged files (API keys auto-redacted from message) |
 
+## Context & Recovery (M3)
+
+M3 introduces token-budget enforcement and dual compression strategies so that long sessions never overflow the model's context window.
+
+### Token budget (§3.4.1)
+
+The budget is 80% of the model's context window.  At 80% usage, compression is triggered.  At 95%, hard truncation kicks in as a safety net.  If the available budget hits zero, the next turn is refused with a clear message.
+
+```
+Total budget   = model_context_window × 0.80
+Output reserve = total_budget × 0.15
+Compress at    = 80% of budget (default)
+Truncate at    = 95% of budget
+```
+
+### Compression strategies
+
+Select via `CODA_COMPRESS` environment variable:
+
+| Strategy | Env value | Description |
+|:---------|:----------|:------------|
+| LLM summary (default) | `llm` | Calls the same LLM provider to summarise the oldest N dialogue rounds into a `<SUMMARY>…</SUMMARY>` block. |
+| Algorithmic | `algorithmic` | Drops `tool_result` content, keeps tool-call metadata and file paths. Zero extra LLM cost — great for offline dev or large codebases. |
+
+```bash
+# Use algorithmic compression (no extra LLM calls):
+CODA_COMPRESS=algorithmic uv run coda "..."
+
+# Override the token ratio for Claude (default 1.1x, tiktoken undercounts):
+CODA_TOKEN_RATIO=1.15 uv run coda --model anthropic/claude-3-5-sonnet "..."
+```
+
+### Error recovery (7 scenarios, §7.5)
+
+| # | Scenario | Recovery |
+|---|----------|----------|
+| 1 | LLM returns invalid tool-call JSON | Re-inject schema + error; retry ×2, then abort |
+| 2 | Tool execution timeout | Kill subprocess; skip tool call with truncated partial result |
+| 3 | Agent stall (3× same write-tool call) | Abort turn; show last 3 calls to user |
+| 4 | Compression-induced context loss | Re-inject pinned file paths + last user message |
+| 5 | File externally modified (SHA-256 conflict) | Block write; ask agent to re-read the file first |
+| 6 | Provider rate limit / 5xx | Exponential back-off ×3 (1 s / 2 s / 4 s) |
+| 7 | File permission denied (EACCES) | Skip write; report path + permission bits |
+
+### CLI flags (M3 new)
+
+```bash
+# Limit tool calls per turn (default 15):
+uv run coda --max-tool-calls 5 "..."
+
+# Set compression window (how many dialogue rounds to compress at once):
+uv run coda --summary-window 3 "..."
+```
 
 ## Local development
 
@@ -92,7 +148,7 @@ export OPENAI_API_KEY=sk-...
 coda/
   src/coda/
     cli/        # Typer entry, REPL, headless exec
-    core/       # Agent loop, Context, Session, recovery
+    core/       # Agent loop, Context, Budget, Compression, Recovery, Events
     llm/        # LLMProvider Protocol + LiteLLM adapter
     tools/      # File / shell / patch / search / git tools
     sandbox/    # Path firewall, command policy, approval modes
