@@ -57,9 +57,7 @@ class _FakeLLMProvider:
         return 0
 
     def count_message_tokens(self, messages: list[Message]) -> int:
-        return sum(
-            len(m.content) // 4 if isinstance(m.content, str) else 10 for m in messages
-        )
+        return sum(len(m.content) // 4 if isinstance(m.content, str) else 10 for m in messages)
 
 
 # ---------------------------------------------------------------------------
