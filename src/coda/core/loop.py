@@ -74,7 +74,8 @@ class AgentLoop:
 
     async def run(self, user_input: str) -> TurnResult:
         """Execute one full agent turn for *user_input*."""
-        messages = self.context_manager.build_messages(user_input)
+        self.context_manager.add_user_input(user_input)
+        messages = self.context_manager.build_messages()
         tool_defs = self._registry.all_defs()
 
         tool_calls_made = 0
@@ -144,10 +145,7 @@ class AgentLoop:
 
             # Rebuild messages with the tool results appended
             self.context_manager.compress_if_needed()
-            messages = [
-                Message(role="system", content=self._config.system_prompt),
-                *self.context_manager.history,
-            ]
+            messages = self.context_manager.build_messages()
 
         return TurnResult(
             final_text=final_text,

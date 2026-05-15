@@ -3,6 +3,16 @@
 Maintains the full message history in memory without compression.
 Token budget tracking returns rough estimates (tiktoken via LLMProvider).
 
+Design principle (separation of concerns):
+  - add_user_input()   — **write**: appends the user message to _history.
+  - build_messages()   — **read**: returns [system] + _history; no side-effects.
+  - append_assistant() — **write**: appends the assistant message to _history.
+  - append_tool_result()— **write**: appends a tool-result message to _history.
+
+All write methods go through _history so that build_messages() always produces
+a complete, valid conversation that satisfies the user→assistant→tool_result
+alternation required by Anthropic / OpenAI.
+
 M3 will replace compress_if_needed() with the real algorithm from
 architecture.md §3.4.1.
 """
@@ -28,11 +38,19 @@ class InMemoryContextManager:
     # ContextManager Protocol implementation
     # ------------------------------------------------------------------
 
-    def build_messages(self, user_input: str) -> list[Message]:
-        """Return the full message list including system prompt + history + new user message."""
+    def add_user_input(self, user_input: str) -> None:
+        """Append the user message to history (write, explicit, no side-effects on read)."""
+        self._history.append(Message(role="user", content=user_input))
+
+    def build_messages(self) -> list[Message]:
+        """Return [system] + full history as a flat list (read-only, no side-effects).
+
+        Always includes the original user message because add_user_input() stores
+        it in _history — so multi-turn ReAct loops never lose the user message
+        when rebuilding the message list after a tool-call round-trip.
+        """
         system = Message(role="system", content=self._system_prompt)
-        user = Message(role="user", content=user_input)
-        return [system, *self._history, user]
+        return [system, *self._history]
 
     def append_assistant(self, msg: Message) -> None:
         self._history.append(msg)

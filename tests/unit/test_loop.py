@@ -38,8 +38,41 @@ def _ctx(tmp_path: Path) -> ToolContext:
     )
 
 
+def _assert_valid_message_sequence(messages: list[Message]) -> None:
+    """Assert that *messages* satisfies basic LLM protocol constraints.
+
+    Rules checked (mirrors Anthropic / OpenAI wire format requirements):
+      1. First message must be role=="system".
+      2. At least one role=="user" message must be present.
+      3. Every tool_call_id referenced in a role=="tool" message must have been
+         emitted by an immediately-preceding assistant message's tool_calls list.
+    """
+    assert messages, "messages list must not be empty"
+    assert messages[0].role == "system", f"First message must be system, got {messages[0].role!r}"
+    user_roles = [m for m in messages if m.role == "user"]
+    assert user_roles, "messages must contain at least one user message"
+
+    # Verify tool_call_id pairing
+    pending_tool_ids: set[str] = set()
+    for msg in messages:
+        if msg.role == "assistant" and msg.tool_calls:
+            pending_tool_ids = {tc.id for tc in msg.tool_calls if tc.id}
+        elif msg.role == "tool":
+            tc_id = msg.tool_call_id or ""
+            assert tc_id in pending_tool_ids, (
+                f"tool message references unknown tool_call_id {tc_id!r}; "
+                f"known ids: {pending_tool_ids}"
+            )
+            pending_tool_ids.discard(tc_id)
+
+
 class _FakeLLMProvider:
-    """Drives a pre-scripted sequence of LLM responses."""
+    """Drives a pre-scripted sequence of LLM responses.
+
+    Validates the message sequence on every chat() call so that protocol
+    violations (e.g. missing user message) are caught immediately in tests
+    rather than surfacing as cryptic 400 errors from real LLM endpoints.
+    """
 
     def __init__(self, responses: list[Message]) -> None:
         self._responses = list(responses)
@@ -52,6 +85,7 @@ class _FakeLLMProvider:
         tools: list[ToolDef] | None = None,
         **kwargs: Any,
     ) -> Message:
+        _assert_valid_message_sequence(messages)
         self.calls.append(messages)
         response = self._responses[self._index]
         self._index = min(self._index + 1, len(self._responses) - 1)
@@ -117,7 +151,8 @@ class EchoTool:
 
 def test_context_build_messages_includes_system_and_user() -> None:
     ctx = InMemoryContextManager(system_prompt="system")
-    msgs = ctx.build_messages("hello")
+    ctx.add_user_input("hello")
+    msgs = ctx.build_messages()
     assert msgs[0].role == "system"
     assert msgs[-1].role == "user"
     assert msgs[-1].content == "hello"
@@ -277,3 +312,75 @@ async def test_loop_multi_turn_history(tmp_path: Path) -> None:
     # History should contain both assistant replies
     history_roles = [m.role for m in loop.context_manager.history]
     assert history_roles.count("assistant") == 2
+
+
+# ---------------------------------------------------------------------------
+# Regression: user message must survive across tool-call round-trips
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_loop_preserves_user_message_across_tool_call(tmp_path: Path) -> None:
+    """The original user message must appear in EVERY LLM call, including the
+    second one after a tool-call round-trip.
+
+    Regression test for: second chat() call omitting the user message, causing
+    Anthropic/compatible endpoints to return 400 "messages 参数非法" (error 1214).
+    """
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+
+    tool_call = ToolCall(id="tc-reg-1", name="echo", arguments={"message": "ping"})
+    provider = _FakeLLMProvider(
+        [
+            # Turn 1: model requests a tool call
+            Message(role="assistant", content="", tool_calls=[tool_call]),
+            # Turn 2: model gives a final answer after seeing the tool result
+            Message(role="assistant", content="all done"),
+        ]
+    )
+
+    original_prompt = "please echo ping"
+    await AgentLoop(
+        provider=provider,
+        registry=registry,
+        tool_ctx=_ctx(tmp_path),
+        approval=_AutoApprovalManager(),
+    ).run(original_prompt)
+
+    # The fake provider validated sequence on every call (_assert_valid_message_sequence).
+    # Additionally verify the second call still carries the original user message.
+    assert len(provider.calls) == 2, "expected exactly two chat() calls"
+    second_call_messages = provider.calls[1]
+    user_messages = [m for m in second_call_messages if m.role == "user"]
+    assert user_messages, "second chat() call must contain at least one user message"
+    assert any(m.content == original_prompt for m in user_messages), (
+        f"original user prompt {original_prompt!r} not found in second chat() call; "
+        f"messages: {[m.role for m in second_call_messages]}"
+    )
+
+
+def test_context_user_input_persists_in_history() -> None:
+    """add_user_input() must write to _history so build_messages() and
+    history both return the user message on subsequent calls.
+
+    This is the unit-level pin for the same bug caught at loop level in
+    test_loop_preserves_user_message_across_tool_call.
+    """
+    ctx = InMemoryContextManager(system_prompt="sys")
+    ctx.add_user_input("hello coda")
+
+    # history property must include the user message
+    assert len(ctx.history) == 1
+    assert ctx.history[0].role == "user"
+    assert ctx.history[0].content == "hello coda"
+
+    # build_messages() must also include it (second call — simulates loop rebuild)
+    msgs = ctx.build_messages()
+    user_in_msgs = [m for m in msgs if m.role == "user"]
+    assert user_in_msgs, "build_messages() must include the user message"
+    assert user_in_msgs[0].content == "hello coda"
+
+    # Calling build_messages() again must not duplicate entries (pure read)
+    msgs2 = ctx.build_messages()
+    assert len(msgs2) == len(msgs), "build_messages() must be idempotent (no side effects)"
