@@ -10,10 +10,14 @@ Design:
   before reading or writing.
 - LF/CRLF normalisation: the patch engine operates on LF-normalised text
   but preserves the original line endings of each file when writing back.
+- M3: SHA-256 conflict detection for files in the _sha256_cache (populated
+  by read_file).  If a file was externally modified between read and patch,
+  the apply is rejected before any write.
 """
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import unidiff  # type: ignore[import-untyped]
@@ -83,7 +87,26 @@ class ApplyPatchTool:
                         "If this is a new file, the patch header must use /dev/null as source."
                     )
                 try:
-                    # Read with newline="" to preserve CRLF (do NOT let Python normalise)
+                    # Read raw bytes for SHA-256 check, then decode for snapshot
+                    raw_data = target.read_bytes()
+                except OSError as exc:
+                    return f"ERROR: cannot read '{raw_path}': {exc}"
+
+                # M3 recovery scenario 5: detect external modification
+                from coda.tools.builtin.fs import _sha256_cache
+
+                current_sha256 = hashlib.sha256(raw_data).hexdigest()
+                cached_sha256 = _sha256_cache.get(str(target))
+                if cached_sha256 is not None and current_sha256 != cached_sha256:
+                    _sha256_cache[str(target)] = current_sha256
+                    return (
+                        f"ERROR: file '{raw_path}' was modified externally since it was "
+                        "last read. Re-read the file before applying the patch."
+                    )
+                _sha256_cache[str(target)] = current_sha256
+
+                try:
+                    # Decode for snapshot (preserve CRLF via newline="")
                     with target.open(encoding="utf-8", newline="") as fh:
                         snapshots[target] = fh.read()
                 except OSError as exc:

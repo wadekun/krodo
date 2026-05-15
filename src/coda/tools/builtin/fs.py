@@ -2,11 +2,15 @@
 
 Path safety: every path is resolved via ctx.workspace.root.  No tool ever
 calls Path.cwd() or __file__ (§3.4.2 invariant 2).
+
+M3: edit_file caches the SHA-256 of the file at read-time and validates it
+before writing (recovery scenario 5 — concurrent modification conflict).
 """
 
 from __future__ import annotations
 
 import difflib
+import hashlib
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -15,6 +19,14 @@ from coda.core.types import ToolDef, ToolResult
 from coda.tools.protocols import ToolContext
 
 _READ_LIMIT_BYTES = 50_000
+
+# Per-instance SHA-256 cache: absolute_path_str → hex_digest
+# Populated on read; validated before write in edit_file.
+_sha256_cache: dict[str, str] = {}
+
+
+def _compute_sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
 def _resolve_path(path: str, ctx: ToolContext) -> Path | str:
@@ -78,6 +90,9 @@ class ReadFileTool:
             raw = target.read_bytes()
         except OSError as exc:
             return f"ERROR: cannot read '{params.path}': {exc}"
+
+        # Cache SHA-256 for conflict detection in edit_file (M3 recovery scenario 5)
+        _sha256_cache[str(target)] = _compute_sha256(raw)
 
         if len(raw) > _READ_LIMIT_BYTES:
             raw = raw[:_READ_LIMIT_BYTES]
@@ -206,10 +221,24 @@ class EditFileTool:
             return f"ERROR: '{params.path}' is not a regular file"
 
         try:
-            original = target.read_text(encoding="utf-8")
+            raw_bytes = target.read_bytes()
         except OSError as exc:
             return f"ERROR: cannot read '{params.path}': {exc}"
 
+        # M3 recovery scenario 5: detect external modification via SHA-256
+        current_sha256 = _compute_sha256(raw_bytes)
+        cached_sha256 = _sha256_cache.get(str(target))
+        if cached_sha256 is not None and current_sha256 != cached_sha256:
+            # Update cache to reflect current on-disk state
+            _sha256_cache[str(target)] = current_sha256
+            return (
+                f"ERROR: file '{params.path}' was modified externally since it was last read. "
+                "Re-read the file to get its current contents before editing."
+            )
+        # Update cache for this read
+        _sha256_cache[str(target)] = current_sha256
+
+        original = raw_bytes.decode("utf-8", errors="replace")
         count = original.count(params.old_string)
         if count == 0:
             return (
