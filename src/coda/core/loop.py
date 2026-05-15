@@ -19,6 +19,7 @@ import logging
 from dataclasses import dataclass
 
 from coda.core.context import InMemoryContextManager
+from coda.core.events import SessionEventLogger
 from coda.core.recovery import (
     BAD_JSON,
     EACCES,
@@ -33,6 +34,7 @@ from coda.core.recovery import (
 )
 from coda.core.types import (
     Message,
+    SessionEventType,
     ToolCall,
     ToolResult,
 )
@@ -81,6 +83,7 @@ class AgentLoop:
         approval: ApprovalManager,
         *,
         config: LoopConfig | None = None,
+        event_logger: SessionEventLogger | None = None,
     ) -> None:
         self._provider = provider
         self._registry = registry
@@ -89,13 +92,20 @@ class AgentLoop:
         self._config = config or LoopConfig()
         self._logger = tool_ctx.logger
         self._stall = StallDetector()
+        self._event_logger = event_logger
         self.context_manager = InMemoryContextManager(
             system_prompt=self._config.system_prompt,
         )
 
+    def _emit(self, event_type: SessionEventType, **data: object) -> None:
+        """Emit a SessionEvent if an event_logger is configured."""
+        if self._event_logger is not None:
+            self._event_logger.emit(event_type, data=dict(data))
+
     async def run(self, user_input: str) -> TurnResult:  # noqa: C901
         """Execute one full agent turn for *user_input*."""
         self.context_manager.add_user_input(user_input)
+        self._emit(SessionEventType.USER_MESSAGE, content=user_input)
         self._stall.reset()
 
         messages = self.context_manager.build_messages()
@@ -120,6 +130,7 @@ class AgentLoop:
                 )
                 provider_retry = 0  # reset on success
             except Exception as exc:  # noqa: BLE001
+                self._emit(SessionEventType.ERROR, error_kind=PROVIDER_ERROR, error=str(exc))
                 action, msg = await handle(
                     RecoveryContext(
                         error_kind=PROVIDER_ERROR,
@@ -170,12 +181,17 @@ class AgentLoop:
                 # Model produced a final answer — store and return
                 final_text = response.content if isinstance(response.content, str) else ""
                 self.context_manager.append_assistant(response)
+                self._emit(SessionEventType.ASSISTANT_MESSAGE, content=final_text)
                 break
 
             # ----------------------------------------------------------------
             # Process each tool call
             # ----------------------------------------------------------------
             self.context_manager.append_assistant(response)
+            self._emit(
+                SessionEventType.ASSISTANT_MESSAGE,
+                tool_calls=[{"name": tc.name, "id": tc.id} for tc in (response.tool_calls or [])],
+            )
 
             for tc in response.tool_calls:
                 if tool_calls_made >= self._config.max_tool_calls_per_turn:
@@ -190,6 +206,7 @@ class AgentLoop:
                 try:
                     self._stall.record(tc.name, tc.arguments or {})
                 except StallError as exc:
+                    self._emit(SessionEventType.ERROR, error_kind=STALL, tool_name=tc.name)
                     action, msg = await handle(
                         RecoveryContext(
                             error_kind=STALL,
@@ -202,12 +219,24 @@ class AgentLoop:
                     aborted = True
                     break
 
+                self._emit(
+                    SessionEventType.TOOL_CALL,
+                    tool_name=tc.name,
+                    tool_call_id=tc.id or "",
+                    arguments=tc.arguments or {},
+                )
+
                 decision = await self._approval.check(
                     ToolCall(
                         id=tc.id or "",
                         name=tc.name,
                         arguments=tc.arguments or {},
                     )
+                )
+                self._emit(
+                    SessionEventType.APPROVAL_DECISION,
+                    tool_name=tc.name,
+                    decision=decision,
                 )
 
                 if decision == "deny":
@@ -261,6 +290,12 @@ class AgentLoop:
                     )
 
                 self.context_manager.append_tool_result(result)
+                self._emit(
+                    SessionEventType.TOOL_RESULT,
+                    tool_call_id=result.tool_call_id,
+                    is_error=result.is_error,
+                    content_length=len(result.content),
+                )
                 tool_calls_made += 1
 
                 if aborted:
@@ -270,7 +305,9 @@ class AgentLoop:
                 break
 
             # Compress context and rebuild messages for next LLM call
-            await self.context_manager.compress_if_needed()
+            compression_event = await self.context_manager.compress_if_needed()
+            if compression_event is not None and self._event_logger is not None:
+                self._event_logger.emit_from(compression_event)
             messages = self.context_manager.build_messages()
 
         return TurnResult(
