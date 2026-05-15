@@ -144,7 +144,7 @@ class AgentLoop:
                 break
 
             # Rebuild messages with the tool results appended
-            self.context_manager.compress_if_needed()
+            await self.context_manager.compress_if_needed()
             messages = self.context_manager.build_messages()
 
         return TurnResult(

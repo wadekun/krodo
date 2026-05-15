@@ -9,7 +9,7 @@ Design principle (separation of concerns):
   - build_messages()    — **read**: returns [system] + _history; no side-effects.
   - append_assistant()  — **write**: appends the assistant message to _history.
   - append_tool_result()— **write**: appends a tool-result message to _history.
-  - compress_if_needed()— **side-effect**: may mutate _history to reduce tokens.
+  - compress_if_needed()— **async side-effect**: may mutate _history to reduce tokens.
 
 All write methods go through _history so that build_messages() always produces
 a complete, valid conversation that satisfies the user→assistant→tool_result
@@ -21,10 +21,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from coda.core.types import Message, ToolResult
+from coda.core.types import Message, SessionEvent, ToolResult
 
 if TYPE_CHECKING:
     from coda.core.budget import BudgetCalculator
+    from coda.core.compression import Compressor
 
 
 class InMemoryContextManager:
@@ -36,12 +37,14 @@ class InMemoryContextManager:
         model_context_window: int = 128_000,
         *,
         budget: BudgetCalculator | None = None,
+        compressor: Compressor | None = None,
         count_fn: Callable[[list[Message]], int] | None = None,
     ) -> None:
         self._system_prompt = system_prompt
         self._context_window = model_context_window
         self._history: list[Message] = []
         self._budget = budget
+        self._compressor = compressor
         # count_fn used as a fallback when no budget calculator is injected
         self._count_fn = count_fn
 
@@ -74,22 +77,24 @@ class InMemoryContextManager:
         )
         self._history.append(msg)
 
-    def compress_if_needed(self) -> bool:
-        """Check token budget and truncate history if needed.
+    async def compress_if_needed(self) -> SessionEvent | None:
+        """Check token budget and compress/truncate history if needed.
 
-        Returns True if any compression/truncation occurred, False otherwise.
+        Returns a SessionEvent if compression occurred (for the caller to emit),
+        or None if no compression was needed.
+
         When no budget calculator is injected (M1 mode), this is a no-op.
 
-        Compression strategy: drop the oldest non-pinned messages until usage
-        drops below the 80% threshold.  Pinned messages (the system prompt and
-        the most recent user message) are never dropped.
-
-        M3 Note: Full LLM-based summarisation is implemented in compression.py
-        and invoked by the AgentLoop before calling this method.  This method
-        only performs algorithmic truncation as a safety fallback.
+        Compression strategy:
+        1. If a Compressor is injected and budget says COMPRESS or TRUNCATE,
+           delegate to the Compressor (LLM summary or algorithmic).
+        2. If still over threshold after compression, fall back to oldest-first
+           hard truncation as a safety net.
+        3. Pinned messages (system prompt + most-recent user message) are never
+           dropped by the fallback truncation.
         """
         if self._budget is None:
-            return False
+            return None
 
         messages = self.build_messages()
         status = self._budget.check(messages)
@@ -97,22 +102,32 @@ class InMemoryContextManager:
         from coda.core.budget import BudgetAction
 
         if status.action == BudgetAction.OK:
-            return False
+            return None
 
-        # Hard truncation: drop oldest messages until we're back under threshold.
-        # Never drop the system prompt (index 0) or the most recent user message.
-        compressed = False
-        while len(self._history) > 1:
+        compression_event: SessionEvent | None = None
+
+        # Primary: delegate to the Compressor
+        if self._compressor is not None and status.action in (
+            BudgetAction.COMPRESS,
+            BudgetAction.TRUNCATE,
+        ):
+            new_history, compression_event = await self._compressor.compress(list(self._history))
+            self._history = new_history
+
+            # Re-check budget after compression
             messages = self.build_messages()
             status = self._budget.check(messages)
-            if status.action in (BudgetAction.OK, BudgetAction.COMPRESS):
-                # COMPRESS is handled by the Compressor in loop.py; stop here.
-                break
-            # Drop the oldest history entry (index 1 in messages → index 0 in history)
-            self._history.pop(0)
-            compressed = True
 
-        return compressed
+        # Fallback: hard truncation if still over TRUNCATE threshold
+        if status.action == BudgetAction.TRUNCATE:
+            while len(self._history) > 1:
+                messages = self.build_messages()
+                status = self._budget.check(messages)
+                if status.action in (BudgetAction.OK, BudgetAction.COMPRESS):
+                    break
+                self._history.pop(0)
+
+        return compression_event
 
     def token_usage(self) -> tuple[int, int]:
         """Return (used_tokens, budget_tokens).

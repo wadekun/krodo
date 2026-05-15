@@ -206,14 +206,17 @@ class TestContextManagerWithBudget:
         assert used > 0
         assert budget == int(126_000 * 0.80)
 
-    def test_compress_if_needed_returns_false_without_budget(self) -> None:
+    @pytest.mark.asyncio
+    async def test_compress_if_needed_returns_none_without_budget(self) -> None:
         from coda.core.context import InMemoryContextManager
 
         ctx = InMemoryContextManager(system_prompt="sys")
         ctx.add_user_input("hello")
-        assert ctx.compress_if_needed() is False
+        result = await ctx.compress_if_needed()
+        assert result is None
 
-    def test_compress_if_needed_truncates_when_over_95_percent(self) -> None:
+    @pytest.mark.asyncio
+    async def test_compress_if_needed_truncates_when_over_95_percent(self) -> None:
         from coda.core.context import InMemoryContextManager
 
         # Make count_fn return a very large number so we're always over threshold
@@ -224,18 +227,19 @@ class TestContextManagerWithBudget:
         ctx = InMemoryContextManager(system_prompt="sys", budget=calc)
         ctx.add_user_input("user msg 1")
         ctx.add_user_input("user msg 2")
-        result = ctx.compress_if_needed()
-        assert result is True
+        await ctx.compress_if_needed()
         # History should be shorter after truncation
         assert len(ctx.history) < 2
 
-    def test_compress_if_needed_returns_false_when_ok(self) -> None:
+    @pytest.mark.asyncio
+    async def test_compress_if_needed_returns_none_when_ok(self) -> None:
         from coda.core.context import InMemoryContextManager
 
         calc = BudgetCalculator(model="gpt-4o", count_fn=lambda _: 100)
         ctx = InMemoryContextManager(system_prompt="sys", budget=calc)
         ctx.add_user_input("hello")
-        assert ctx.compress_if_needed() is False
+        result = await ctx.compress_if_needed()
+        assert result is None
 
     def test_token_usage_fallback_without_budget(self) -> None:
         from coda.core.context import InMemoryContextManager
