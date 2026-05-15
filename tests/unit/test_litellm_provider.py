@@ -1,0 +1,261 @@
+"""Tests for LiteLLMProvider — Message↔LiteLLM dict conversions + async chat."""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from pydantic import BaseModel
+
+from coda.core.types import Message, ToolCall, ToolDef, ToolResult
+from coda.llm.litellm_provider import (
+    LiteLLMProvider,
+    _litellm_to_message,
+    _message_to_litellm,
+    _tool_result_to_litellm,
+    _tooldef_to_litellm,
+)
+
+# ---------------------------------------------------------------------------
+# _message_to_litellm
+# ---------------------------------------------------------------------------
+
+
+def test_user_message_to_litellm() -> None:
+    msg = Message(role="user", content="hello")
+    d = _message_to_litellm(msg)
+    assert d == {"role": "user", "content": "hello"}
+
+
+def test_assistant_message_with_tool_calls_to_litellm() -> None:
+    msg = Message(
+        role="assistant",
+        content="",
+        tool_calls=[ToolCall(id="tc1", name="read_file", arguments={"path": "foo.py"})],
+    )
+    d = _message_to_litellm(msg)
+    assert d["role"] == "assistant"
+    assert len(d["tool_calls"]) == 1
+    tc = d["tool_calls"][0]
+    assert tc["id"] == "tc1"
+    assert tc["function"]["name"] == "read_file"
+    assert json.loads(tc["function"]["arguments"]) == {"path": "foo.py"}
+
+
+def test_tool_result_message_to_litellm() -> None:
+    msg = Message(role="tool", content="file contents", tool_call_id="tc1")
+    d = _message_to_litellm(msg)
+    assert d["role"] == "tool"
+    assert d["content"] == "file contents"
+    assert d["tool_call_id"] == "tc1"
+
+
+# ---------------------------------------------------------------------------
+# _litellm_to_message
+# ---------------------------------------------------------------------------
+
+
+def _make_litellm_message(**kwargs: Any) -> Any:
+    m = MagicMock()
+    m.role = kwargs.get("role", "assistant")
+    m.content = kwargs.get("content", "")
+    m.tool_calls = kwargs.get("tool_calls", None)
+    return m
+
+
+def _make_tool_call_raw(id: str, name: str, arguments: str) -> Any:
+    tc = MagicMock()
+    tc.id = id
+    tc.function.name = name
+    tc.function.arguments = arguments
+    return tc
+
+
+def test_litellm_to_message_plain_text() -> None:
+    raw = _make_litellm_message(content="Hello world")
+    msg = _litellm_to_message(raw)
+    assert msg.role == "assistant"
+    assert msg.content == "Hello world"
+    assert msg.tool_calls is None
+
+
+def test_litellm_to_message_with_tool_call() -> None:
+    raw = _make_litellm_message(
+        content=None,
+        tool_calls=[_make_tool_call_raw("tc1", "write_file", '{"path": "out.py", "content": "x"}')],
+    )
+    msg = _litellm_to_message(raw)
+    assert msg.tool_calls is not None
+    assert len(msg.tool_calls) == 1
+    assert msg.tool_calls[0].name == "write_file"
+    assert msg.tool_calls[0].arguments == {"path": "out.py", "content": "x"}
+
+
+def test_litellm_to_message_bad_json_arguments() -> None:
+    raw = _make_litellm_message(tool_calls=[_make_tool_call_raw("tc1", "run", "NOT_JSON")])
+    msg = _litellm_to_message(raw)
+    assert msg.tool_calls is not None
+    assert "_raw" in msg.tool_calls[0].arguments
+
+
+# ---------------------------------------------------------------------------
+# _tooldef_to_litellm
+# ---------------------------------------------------------------------------
+
+
+class ReadFileParams(BaseModel):
+    path: str
+    limit: int | None = None
+
+
+def test_tooldef_to_litellm() -> None:
+    td = ToolDef(name="read_file", description="Read a file", parameters=ReadFileParams)
+    d = _tooldef_to_litellm(td)
+    assert d["type"] == "function"
+    fn = d["function"]
+    assert fn["name"] == "read_file"
+    assert fn["description"] == "Read a file"
+    assert "properties" in fn["parameters"]
+    assert "title" not in fn["parameters"]  # stripped
+
+
+# ---------------------------------------------------------------------------
+# _tool_result_to_litellm
+# ---------------------------------------------------------------------------
+
+
+def test_tool_result_to_litellm() -> None:
+    result = ToolResult(tool_call_id="tc1", content="ok", is_error=False)
+    d = _tool_result_to_litellm(result)
+    assert d == {"role": "tool", "tool_call_id": "tc1", "content": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# LiteLLMProvider.chat (mocked litellm.acompletion)
+# ---------------------------------------------------------------------------
+
+
+def _make_acompletion_response(content: str) -> Any:
+    response = MagicMock()
+    response.choices = [MagicMock()]
+    response.choices[0].message.role = "assistant"
+    response.choices[0].message.content = content
+    response.choices[0].message.tool_calls = None
+    return response
+
+
+@pytest.mark.asyncio
+async def test_chat_returns_assistant_message() -> None:
+    provider = LiteLLMProvider(model="anthropic/claude-test")
+    mock_response = _make_acompletion_response("Hello!")
+
+    with patch(
+        "coda.llm.litellm_provider.litellm.acompletion",
+        new_callable=AsyncMock,
+        return_value=mock_response,
+    ):
+        result = await provider.chat(messages=[Message(role="user", content="hi")])
+
+    assert result.role == "assistant"
+    assert result.content == "Hello!"
+
+
+@pytest.mark.asyncio
+async def test_chat_passes_api_base_and_key() -> None:
+    provider = LiteLLMProvider(
+        model="anthropic/claude-test",
+        api_base="https://my-proxy.example.com/v1",
+        api_key="my-key",
+    )
+    mock_response = _make_acompletion_response("ok")
+
+    with patch(
+        "coda.llm.litellm_provider.litellm.acompletion",
+        new_callable=AsyncMock,
+        return_value=mock_response,
+    ) as mock_call:
+        await provider.chat(messages=[Message(role="user", content="hi")])
+
+    call_kwargs = mock_call.call_args.kwargs
+    assert call_kwargs["api_base"] == "https://my-proxy.example.com/v1"
+    assert call_kwargs["api_key"] == "my-key"
+
+
+@pytest.mark.asyncio
+async def test_chat_omits_api_base_when_none() -> None:
+    provider = LiteLLMProvider(model="openai/gpt-4o")
+    mock_response = _make_acompletion_response("ok")
+
+    with patch(
+        "coda.llm.litellm_provider.litellm.acompletion",
+        new_callable=AsyncMock,
+        return_value=mock_response,
+    ) as mock_call:
+        await provider.chat(messages=[Message(role="user", content="hi")])
+
+    call_kwargs = mock_call.call_args.kwargs
+    assert "api_base" not in call_kwargs
+    assert "api_key" not in call_kwargs
+
+
+# ---------------------------------------------------------------------------
+# LiteLLMProvider.stream_chat (mocked)
+# ---------------------------------------------------------------------------
+
+
+def _make_stream_chunk(
+    text: str | None = None,
+    finish_reason: str | None = None,
+) -> Any:
+    chunk = MagicMock()
+    chunk.choices = [MagicMock()]
+    delta = MagicMock()
+    delta.content = text
+    delta.tool_calls = None
+    chunk.choices[0].delta = delta
+    chunk.choices[0].finish_reason = finish_reason
+    chunk.usage = None
+    return chunk
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_yields_chunks() -> None:
+    provider = LiteLLMProvider(model="anthropic/claude-test")
+    chunks = [
+        _make_stream_chunk("Hello"),
+        _make_stream_chunk(", world"),
+        _make_stream_chunk(finish_reason="stop"),
+    ]
+
+    async def _fake_stream() -> Any:
+        for c in chunks:
+            yield c
+
+    with patch(
+        "coda.llm.litellm_provider.litellm.acompletion",
+        new_callable=AsyncMock,
+        return_value=_fake_stream(),
+    ):
+        collected = []
+        async for llm_chunk in provider.stream_chat(messages=[Message(role="user", content="hi")]):
+            collected.append(llm_chunk)
+
+    texts = [c.delta_text for c in collected if c.delta_text]
+    assert "Hello" in texts
+    assert ", world" in texts
+    finish_reasons = [c.finish_reason for c in collected if c.finish_reason]
+    assert "stop" in finish_reasons
+
+
+# ---------------------------------------------------------------------------
+# count_tokens (smoke test — tiktoken may not be exact)
+# ---------------------------------------------------------------------------
+
+
+def test_count_tokens_returns_positive_int() -> None:
+    provider = LiteLLMProvider(model="anthropic/claude-test")
+    n = provider.count_tokens("Hello world, this is a test sentence.")
+    assert isinstance(n, int)
+    assert n > 0
