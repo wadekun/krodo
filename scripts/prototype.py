@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Coda Phase 0 prototype — validate the core ReAct loop against LiteLLM tool-use.
+"""DEPRECATED — use `coda` CLI instead (Phase 1 M1 complete).
+
+This single-file Phase 0 prototype validated the core ReAct loop against
+LiteLLM tool-use.  It has been superseded by the production implementation in
+``src/coda/``.  It is kept here for historical reference and will be removed
+in Phase 2.
 
 Phase 0 acceptance (architecture.md §8):
   0.2  Stream LLM responses token-by-token.

@@ -20,19 +20,32 @@ For full design rationale, see [`docs/architecture.md`](docs/architecture.md).
 
 | Phase | Scope | Status |
 |------:|:------|:------:|
-| 0 | Single-file prototype validating the ReAct loop | ⏳ |
+| 0 | Single-file prototype validating the ReAct loop | ✅ done |
 | 1 | Usable CLI MVP (REPL + headless exec, 11 tools, approval, git safety net) | 🚧 in progress |
 | 2 | tree-sitter symbol index, repo-map, Textual TUI, MCP client | — |
 | 3 | OS-level sandbox, evaluation harness, OpenTelemetry / Langfuse | — |
 | 4 | Production-grade: Rust hot paths, single-binary distribution, LiteLLM Proxy | — |
 
-## Quick start (when v0.1 ships)
+## Quick start
+
+### Try the M1 Walking Skeleton (Phase 1 in-progress)
 
 ```bash
-pipx install coda             # not yet published
-coda init                     # generate .coda/config.yaml + AGENTS.md
-coda                          # interactive REPL
-coda exec "fix the failing test in tests/test_parser.py"
+git clone https://github.com/<org>/coda
+cd coda
+uv sync
+
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY / CODA_API_KEY
+
+mkdir -p /tmp/coda-sandbox
+uv run coda --root /tmp/coda-sandbox "create hello.py that prints Hello Coda, then run it"
+```
+
+### Stable release (v0.1 — not yet published)
+
+```bash
+pipx install coda
+coda --help
 ```
 
 ## Local development
@@ -73,7 +86,7 @@ coda/
     architecture.md         # design baseline (read this first)
     reviews/                # past architecture review notes
   scripts/
-    prototype.py            # Phase 0 single-file prototype (TBD)
+    prototype.py            # Phase 0 single-file prototype (DEPRECATED — use coda CLI)
 ```
 
 ## Contributing
