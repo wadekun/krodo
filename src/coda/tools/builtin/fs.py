@@ -1,4 +1,4 @@
-"""Built-in filesystem tools: read_file, write_file.
+"""Built-in filesystem tools: read_file, write_file, edit_file.
 
 Path safety: every path is resolved via ctx.workspace.root.  No tool ever
 calls Path.cwd() or __file__ (§3.4.2 invariant 2).
@@ -15,6 +15,21 @@ from coda.core.types import ToolDef, ToolResult
 from coda.tools.protocols import ToolContext
 
 _READ_LIMIT_BYTES = 50_000
+
+
+def _resolve_path(path: str, ctx: ToolContext) -> Path | str:
+    """Resolve *path* relative to the workspace root.
+
+    Returns the resolved ``Path`` on success, or an error string on failure.
+    Callers should check ``isinstance(result, str)`` to detect errors.
+    """
+    try:
+        target = (ctx.workspace.root / path).resolve()
+    except (OSError, RuntimeError) as exc:
+        return f"ERROR: cannot resolve path '{path}': {exc}"
+    if not ctx.workspace.is_path_inside(target):
+        return f"ERROR: path '{path}' resolves outside workspace root ({ctx.workspace.root})"
+    return target
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +65,7 @@ class ReadFileTool:
         )
 
     def _read(self, params: ReadFileParams, ctx: ToolContext) -> str:
-        target = self._resolve(params.path, ctx)
+        target = _resolve_path(params.path, ctx)
         if isinstance(target, str):
             return target  # error string
 
@@ -79,16 +94,6 @@ class ReadFileTool:
             text = "".join(lines[start:end])
 
         return text + suffix
-
-    @staticmethod
-    def _resolve(path: str, ctx: ToolContext) -> Path | str:
-        try:
-            target = (ctx.workspace.root / path).resolve()
-        except (OSError, RuntimeError) as exc:
-            return f"ERROR: cannot resolve path '{path}': {exc}"
-        if not ctx.workspace.is_path_inside(target):
-            return f"ERROR: path '{path}' resolves outside workspace root ({ctx.workspace.root})"
-        return target
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +128,7 @@ class WriteFileTool:
         )
 
     def _write(self, params: WriteFileParams, ctx: ToolContext) -> str:
-        target = self._resolve(params.path, ctx)
+        target = _resolve_path(params.path, ctx)
         if isinstance(target, str):
             return target
 
@@ -154,12 +159,96 @@ class WriteFileTool:
         lines = len(params.content.splitlines())
         return f"OK: wrote {lines} lines to '{params.path}'"
 
-    @staticmethod
-    def _resolve(path: str, ctx: ToolContext) -> Path | str:
+
+# ---------------------------------------------------------------------------
+# edit_file
+# ---------------------------------------------------------------------------
+
+
+class EditFileParams(BaseModel):
+    path: str
+    old_string: str
+    new_string: str
+    replace_all: bool = False
+
+
+class EditFileTool:
+    definition = ToolDef(
+        name="edit_file",
+        description=(
+            "Edit a file by replacing an exact string with a new string. "
+            "path is relative to the workspace root. "
+            "old_string must appear exactly once in the file unless replace_all=true. "
+            "For large or multi-location changes, prefer apply_patch instead. "
+            "The caller must have approval before this tool executes."
+        ),
+        parameters=EditFileParams,
+    )
+    requires_approval = True
+
+    async def execute(self, args: dict[str, object], ctx: ToolContext) -> ToolResult:
+        params = EditFileParams.model_validate(args)
+        result_text = self._edit(params, ctx)
+        return ToolResult(
+            tool_call_id="",
+            content=result_text,
+            is_error=result_text.startswith("ERROR"),
+        )
+
+    def _edit(self, params: EditFileParams, ctx: ToolContext) -> str:
+        target = _resolve_path(params.path, ctx)
+        if isinstance(target, str):
+            return target
+
+        if not target.exists():
+            return f"ERROR: file '{params.path}' does not exist"
+        if not target.is_file():
+            return f"ERROR: '{params.path}' is not a regular file"
+
         try:
-            target = (ctx.workspace.root / path).resolve()
-        except (OSError, RuntimeError) as exc:
-            return f"ERROR: cannot resolve path '{path}': {exc}"
-        if not ctx.workspace.is_path_inside(target):
-            return f"ERROR: path '{path}' resolves outside workspace root ({ctx.workspace.root})"
-        return target
+            original = target.read_text(encoding="utf-8")
+        except OSError as exc:
+            return f"ERROR: cannot read '{params.path}': {exc}"
+
+        count = original.count(params.old_string)
+        if count == 0:
+            return (
+                f"ERROR: old_string not found in '{params.path}'. "
+                "Add more surrounding context to make it unique."
+            )
+        if count > 1 and not params.replace_all:
+            # Report line numbers to help the model refine old_string
+            lines_with_hit = [
+                i + 1 for i, line in enumerate(original.splitlines()) if params.old_string in line
+            ]
+            return (
+                f"ERROR: old_string appears {count} times in '{params.path}' "
+                f"(lines containing match: {lines_with_hit}). "
+                "Provide more context to make it unique, or set replace_all=true."
+            )
+
+        updated = (
+            original.replace(params.old_string, params.new_string)
+            if params.replace_all
+            else original.replace(params.old_string, params.new_string, 1)
+        )
+
+        diff = "\n".join(
+            difflib.unified_diff(
+                original.splitlines(),
+                updated.splitlines(),
+                fromfile=f"a/{params.path}",
+                tofile=f"b/{params.path}",
+                lineterm="",
+            )
+        )
+        if diff:
+            ctx.logger.info("edit_file diff:\n%s", diff)
+
+        try:
+            target.write_text(updated, encoding="utf-8")
+        except OSError as exc:
+            return f"ERROR: cannot write '{params.path}': {exc}"
+
+        replacements = count if params.replace_all else 1
+        return f"OK: replaced {replacements} occurrence(s) in '{params.path}'"
