@@ -45,6 +45,9 @@ dependencies = [
     "unidiff>=0.7,<1",
 ]
 
+[project.scripts]
+coda = "coda.cli.main:app"
+
 [dependency-groups]
 dev = [
     "mypy>=1.10",
@@ -75,6 +78,8 @@ select = [
 ]
 ignore = [
     "S101",   # 允许 assert（pytest 与防御式编程都需要）
+    "B008",   # Typer/FastAPI pattern: function calls in argument defaults
+    "ASYNC109",  # timeout as parameter name is valid (asyncio.timeout is different)
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -82,7 +87,10 @@ ignore = [
     "S101",   # tests 大量使用 assert
     "S105",   # tests 中可能出现"假"的 hardcoded password
     "S106",
+    "S108",   # /tmp paths in tests are intentional
     "T201",   # tests 偶尔需要 print 调试
+    "ASYNC240",  # Path methods in async tests are fine (not trio/anyio)
+    "B017",   # broad exception assertions in tests are acceptable
 ]
 "scripts/**" = [
     "T201",   # 原型脚本允许 print
