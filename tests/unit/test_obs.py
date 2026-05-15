@@ -105,3 +105,44 @@ def test_get_session_log_path_correct_location(tmp_path: Path) -> None:
     ws = LocalWorkspaceResolver().resolve(explicit=tmp_path)
     path = get_session_log_path(ws, "abc-123")
     assert path == tmp_path / ".coda" / "logs" / "abc-123.jsonl"
+
+
+# ---------------------------------------------------------------------------
+# _SecretRedactorProcessor (structlog processor)
+# ---------------------------------------------------------------------------
+
+
+def test_secret_redactor_processor_redacts_string_values(tmp_path: Path) -> None:
+    from coda.obs.logger import _SecretRedactorProcessor
+
+    proc = _SecretRedactorProcessor()
+    event_dict = {"event": "test", "key": "sk-ant-api03-ABC123456789abc"}
+    result = proc(None, "info", event_dict)
+    assert "[REDACTED]" in result["key"]
+    assert "ABC123456789abc" not in result["key"]
+
+
+def test_secret_redactor_processor_ignores_non_strings(tmp_path: Path) -> None:
+    from coda.obs.logger import _SecretRedactorProcessor
+
+    proc = _SecretRedactorProcessor()
+    event_dict = {"count": 42, "flag": True, "event": "safe"}
+    result = proc(None, "info", event_dict)
+    assert result["count"] == 42
+    assert result["flag"] is True
+
+
+# ---------------------------------------------------------------------------
+# _SecretRedactorFilter — dict args branch
+# ---------------------------------------------------------------------------
+
+
+def test_secret_not_written_with_dict_args(tmp_path: Path) -> None:
+    ws = LocalWorkspaceResolver().resolve(explicit=tmp_path)
+    logger = configure_logging(ws, "test-session-006")
+    secret = "sk-ant-api03-DICTSECRET9876543"
+    # Pass args as dict (format string with %(key)s)
+    logger.info("api key is %(key)s", {"key": secret})
+    log_path = get_session_log_path(ws, "test-session-006")
+    content = log_path.read_text(encoding="utf-8")
+    assert "DICTSECRET9876543" not in content

@@ -144,3 +144,92 @@ def test_cli_tool_call_roundtrip(tmp_path: Path) -> None:
 
     assert result.exit_code == 0, result.output
     assert "world" in result.output
+
+
+def test_cli_glob_tool_chain(tmp_path: Path) -> None:
+    """LLM calls glob → result → final answer. Tests M2 search tool registration."""
+    (tmp_path / "a.py").write_text("x = 1\n")
+    (tmp_path / "b.py").write_text("y = 2\n")
+
+    runner = CliRunner()
+    tc = ToolCall(id="tc-2", name="glob", arguments={"pattern": "**/*.py", "path": "."})
+    responses = [
+        Message(role="assistant", content="", tool_calls=[tc]),
+        Message(role="assistant", content="Found 2 Python files."),
+    ]
+
+    with _patch_provider(responses):
+        result = runner.invoke(
+            app,
+            ["--root", str(tmp_path), "--approval", "full_auto", "find all .py files"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Found 2 Python files." in result.output
+
+
+def test_cli_edit_file_tool_chain(tmp_path: Path) -> None:
+    """LLM calls edit_file → result → final answer. Tests write tool registration."""
+    (tmp_path / "code.py").write_text("x = 1\n")
+
+    runner = CliRunner()
+    tc = ToolCall(
+        id="tc-3",
+        name="edit_file",
+        arguments={"path": "code.py", "old_string": "x = 1", "new_string": "x = 42"},
+    )
+    responses = [
+        Message(role="assistant", content="", tool_calls=[tc]),
+        Message(role="assistant", content="Done: x is now 42."),
+    ]
+
+    with _patch_provider(responses):
+        result = runner.invoke(
+            app,
+            ["--root", str(tmp_path), "--approval", "full_auto", "change x to 42"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Done: x is now 42." in result.output
+    assert (tmp_path / "code.py").read_text() == "x = 42\n"
+
+
+def test_cli_full_auto_warning_visible(tmp_path: Path) -> None:
+    """full_auto mode must print a red warning banner."""
+    runner = CliRunner()
+    responses = [Message(role="assistant", content="done")]
+
+    with _patch_provider(responses):
+        result = runner.invoke(
+            app,
+            ["--root", str(tmp_path), "--approval", "full_auto", "do something"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "full_auto" in result.output or "WARNING" in result.output
+
+
+def test_cli_read_only_denies_write(tmp_path: Path) -> None:
+    """In read_only mode, write_file calls are denied and the agent sees the denial."""
+    (tmp_path / "existing.txt").write_text("original")
+
+    runner = CliRunner()
+    tc = ToolCall(
+        id="tc-4",
+        name="write_file",
+        arguments={"path": "existing.txt", "content": "overwritten"},
+    )
+    responses = [
+        Message(role="assistant", content="", tool_calls=[tc]),
+        Message(role="assistant", content="I cannot write files in read_only mode."),
+    ]
+
+    with _patch_provider(responses):
+        result = runner.invoke(
+            app,
+            ["--root", str(tmp_path), "--approval", "read_only", "overwrite file"],
+        )
+
+    assert result.exit_code == 0, result.output
+    # File must NOT be modified
+    assert (tmp_path / "existing.txt").read_text() == "original"

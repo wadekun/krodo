@@ -207,3 +207,36 @@ async def test_apply_patch_path_traversal_denied(tmp_path: Path) -> None:
     result = await ApplyPatchTool().execute({"patch": patch}, ctx)
     assert result.is_error
     assert "outside workspace" in result.content
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_removed_file(tmp_path: Path) -> None:
+    """Patch that deletes a file (source /dev/null as target)."""
+    (tmp_path / "to_delete.txt").write_text("old content\n")
+    patch = textwrap.dedent("""\
+        --- a/to_delete.txt
+        +++ /dev/null
+        @@ -1,1 +0,0 @@
+        -old content
+    """)
+    ctx = _ctx(tmp_path)
+    result = await ApplyPatchTool().execute({"patch": patch}, ctx)
+    assert not result.is_error, result.content
+    assert not (tmp_path / "to_delete.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_hunk_context_mismatch_error(tmp_path: Path) -> None:
+    """Patch whose context lines don't match should return an error."""
+    (tmp_path / "f.py").write_text("actual line\n")
+    patch = textwrap.dedent("""\
+        --- a/f.py
+        +++ b/f.py
+        @@ -1,1 +1,1 @@
+        -different line
+        +new line
+    """)
+    ctx = _ctx(tmp_path)
+    result = await ApplyPatchTool().execute({"patch": patch}, ctx)
+    assert result.is_error
+    assert "hunk application failed" in result.content or "mismatch" in result.content

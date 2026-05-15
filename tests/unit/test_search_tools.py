@@ -263,3 +263,86 @@ async def test_grep_uses_ripgrep_when_available(tmp_path: Path) -> None:
     result = await GrepTool().execute({"pattern": "TODO", "path": "."}, ctx)
     assert not result.is_error, result.content
     assert "TODO" in result.content
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: truncation, edge cases
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_dir_empty_directory(tmp_path: Path) -> None:
+    empty = tmp_path / "empty_dir"
+    empty.mkdir()
+    ctx = _ctx(tmp_path)
+    result = await ListDirTool().execute({"path": "empty_dir"}, ctx)
+    assert not result.is_error
+    assert "empty" in result.content
+
+
+@pytest.mark.asyncio
+async def test_glob_base_path_not_exist(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    result = await GlobTool().execute({"pattern": "*.py", "path": "nonexistent"}, ctx)
+    assert result.is_error
+    assert "does not exist" in result.content
+
+
+@pytest.mark.asyncio
+async def test_grep_on_missing_path(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    result = await GrepTool().execute({"pattern": "x", "path": "no_such_dir"}, ctx)
+    assert result.is_error
+    assert "does not exist" in result.content
+
+
+@pytest.mark.asyncio
+async def test_grep_python_fallback_no_matches_for_include(tmp_path: Path) -> None:
+    """Python fallback with include filter that doesn't match any files."""
+    _make_tree(tmp_path)
+    ctx = _ctx(tmp_path)
+    with patch("coda.tools.builtin.search._try_ripgrep", new_callable=AsyncMock, return_value=None):
+        result = await GrepTool().execute({"pattern": "TODO", "path": ".", "include": "*.rs"}, ctx)
+    assert not result.is_error
+    assert "no matches" in result.content
+
+
+@pytest.mark.asyncio
+async def test_try_ripgrep_returns_none_when_rg_not_found(tmp_path: Path) -> None:
+    """_try_ripgrep returns None when rg binary is not found."""
+    from coda.tools.builtin.search import _try_ripgrep
+
+    with patch(
+        "asyncio.create_subprocess_exec",
+        side_effect=FileNotFoundError("rg not found"),
+    ):
+        result = await _try_ripgrep(
+            "TODO",
+            tmp_path,
+            tmp_path,
+            case_sensitive=True,
+            include=None,
+        )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_try_ripgrep_no_output_returns_no_matches(tmp_path: Path) -> None:
+    """_try_ripgrep returns a '(no matches)' string when rg exits with empty output."""
+    from unittest.mock import MagicMock
+
+    from coda.tools.builtin.search import _try_ripgrep
+
+    mock_proc = MagicMock()
+    mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+        result = await _try_ripgrep(
+            "XYZZY_NOT_FOUND",
+            tmp_path,
+            tmp_path,
+            case_sensitive=True,
+            include=None,
+        )
+    assert result is not None
+    assert "no matches" in result

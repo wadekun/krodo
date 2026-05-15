@@ -28,7 +28,7 @@ For full design rationale, see [`docs/architecture.md`](docs/architecture.md).
 
 ## Quick start
 
-### Try the M1 Walking Skeleton (Phase 1 in-progress)
+### Try the M2 Full Tools (Phase 1 in-progress)
 
 ```bash
 git clone https://github.com/<org>/coda
@@ -47,6 +47,23 @@ uv run coda --root /tmp/coda-sandbox "create hello.py that prints Hello Coda, th
 pipx install coda
 coda --help
 ```
+
+## Available tools (M2, 11 total)
+
+| Tool | Category | Requires approval | Description |
+|:-----|:---------|:-----------------:|:------------|
+| `read_file` | Read | No | Read a file (with optional offset/limit) |
+| `list_dir` | Read | No | List directory contents (depth-limited, noise-dirs skipped) |
+| `glob` | Read | No | Find files matching a pattern (`**/*.py`) |
+| `grep` | Read | No | Regex search; ripgrep when available, Python fallback |
+| `git_status` | Git | No | Show working tree status (`git status --porcelain`) |
+| `git_diff` | Git | No | Show unified diff (staged/unstaged, optional path filter) |
+| `write_file` | Write | Yes | Write or overwrite a file |
+| `edit_file` | Write | Yes | Targeted string replacement with uniqueness enforcement |
+| `apply_patch` | Write | Yes | Apply a unified diff atomically with rollback on failure |
+| `run_shell` | Shell | Yes | Execute a shell command inside the workspace sandbox |
+| `git_commit` | Git | Yes | Commit staged files (API keys auto-redacted from message) |
+
 
 ## Local development
 

@@ -50,6 +50,35 @@ uv run mypy src                # type-check
 uv run python scripts/prototype.py    # Phase 0 prototype (when written)
 ```
 
+
+## M2 tools: the 8 new tools added in Phase 1 M2
+
+M2 extended the 3 M1 tools to a full set of 11:
+
+### Search / read tools (no approval needed)
+- **`list_dir`** — list directory with depth control (1–10). Skips noise dirs (node_modules, __pycache__, .git, .venv, etc.).
+- **`glob`** — find files by pathlib glob pattern. Filters via `filter_allowed_paths()` (symlink-safe).
+- **`grep`** — regex search in files. Prefers ripgrep (`rg`) for speed; Python `re` fallback. Install ripgrep for large codebases.
+
+### Edit / patch tools (require approval in auto_edit mode)
+- **`edit_file`** — precise string replacement. `old_string` must be unique unless `replace_all=true`. On ambiguity, reports line numbers to help the model narrow context.
+- **`apply_patch`** — apply a unified diff (udiff). Atomic transaction: snapshots all targets before writing; rolls back all on any failure. Handles LF/CRLF transparently.
+
+### Git tools (status/diff = no approval; commit = approval)
+- **`git_status`** — `git status --porcelain` via GitPython. Error if not in a git repo.
+- **`git_diff`** — unified diff; supports `staged=true` and path filter.
+- **`git_commit`** — commit staged files. `add_all=true` runs `git add -u` first. Auto-redacts API key literals from commit messages.
+
+### Path safety (all tools)
+`sandbox/path_filter.py` provides `filter_allowed_paths()` and `is_noise_dir()`, used by bulk-result tools to silently drop out-of-workspace paths and noise directories.
+
+### Approval modes (M2 complete)
+- `read_only` — only read/search/status tools; write/shell always denied.
+- `auto_edit` (default) — reads auto-approved; writes prompt `[y/n/a/p/?]`.
+  - `p` enters a pattern rule: `<tool_name> <glob>` (e.g. `run_shell pytest*`).
+  - Pattern rules stored in memory; persisted to SQLite in M5.
+- `full_auto` — all tools auto-approved; red warning banner printed at startup.
+
 ## When you (the agent) modify this codebase
 
 - Always `read_file` before `edit_file` — never guess file contents.

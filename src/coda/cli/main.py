@@ -27,7 +27,10 @@ from coda.llm.litellm_provider import LiteLLMProvider
 from coda.obs.logger import configure_logging
 from coda.sandbox.approval import TerminalApprovalManager
 from coda.sandbox.firewall import LocalSandboxRunner
-from coda.tools.builtin.fs import ReadFileTool, WriteFileTool
+from coda.tools.builtin.fs import EditFileTool, ReadFileTool, WriteFileTool
+from coda.tools.builtin.git import GitCommitTool, GitDiffTool, GitStatusTool
+from coda.tools.builtin.patch import ApplyPatchTool
+from coda.tools.builtin.search import GlobTool, GrepTool, ListDirTool
 from coda.tools.builtin.shell import RunShellTool
 from coda.tools.protocols import ToolContext
 from coda.tools.registry import ToolRegistry
@@ -75,7 +78,12 @@ def main(
         "auto_edit",
         "--approval",
         "-a",
-        help="Approval mode: read_only | auto_edit | full_auto",
+        help=(
+            "Approval mode: "
+            "read_only (deny all writes), "
+            "auto_edit (prompt for writes, default), "
+            "full_auto (approve everything — use with caution)"
+        ),
         envvar="CODA_APPROVAL",
     ),
 ) -> None:
@@ -114,6 +122,21 @@ async def _async_main(
     # 3. Print banner (invariant: visible before any tool execution)
     print_banner(workspace, approval_mode=approval_mode)
 
+    # 4. full_auto warning banner
+    if approval_mode == "full_auto":
+        from rich.console import Console
+        from rich.panel import Panel
+
+        Console().print(
+            Panel(
+                "[bold red]WARNING: full_auto mode active.[/bold red]\n"
+                "All tools will execute without any approval prompts.\n"
+                "Ensure you trust the task and workspace before proceeding.",
+                title="[red]⚠  Security Warning[/red]",
+                border_style="red",
+            )
+        )
+
     logger.info(
         "session_init session_id=%s model=%s approval=%s",
         session_id,
@@ -121,7 +144,7 @@ async def _async_main(
         approval_mode,
     )
 
-    # 4. Wire up dependencies
+    # 5. Wire up dependencies
     sandbox = LocalSandboxRunner(workspace)
     approval_manager = TerminalApprovalManager(mode=approval_mode)  # type: ignore[arg-type]
 
@@ -132,9 +155,19 @@ async def _async_main(
     )
 
     registry = ToolRegistry()
+    # M1 tools
     registry.register(ReadFileTool())
     registry.register(WriteFileTool())
     registry.register(RunShellTool())
+    # M2 tools
+    registry.register(EditFileTool())
+    registry.register(ListDirTool())
+    registry.register(GlobTool())
+    registry.register(GrepTool())
+    registry.register(ApplyPatchTool())
+    registry.register(GitStatusTool())
+    registry.register(GitDiffTool())
+    registry.register(GitCommitTool())
 
     tool_ctx = ToolContext(
         workspace=workspace,
@@ -151,7 +184,7 @@ async def _async_main(
         config=LoopConfig(),
     )
 
-    # 5. Run
+    # 6. Run
     result = await loop.run(prompt)
 
     if result.hit_tool_call_limit:
