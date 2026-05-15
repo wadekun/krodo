@@ -1,0 +1,61 @@
+# Project memory: Coda
+
+> This file is auto-loaded into the system prompt of every Coda session running in this repository (see `docs/architecture.md` §5.6). Keep it concise — total budget is 8K tokens.
+
+## What this project is
+
+Coda is a local-first, multi-provider coding agent CLI. We are currently in **Phase 1 (MVP)**: building a usable REPL + headless `coda exec` with 11 tools, three approval modes, automatic git checkpoints, and SQLite-backed sessions. We are explicitly **not** building TUI / RAG / Docker sandbox / IDE plugins / Web UI in this phase.
+
+The single source of truth for design decisions is [`docs/architecture.md`](docs/architecture.md). When in doubt, read it first; if the design is unclear or wrong, update the doc in the same PR as the code.
+
+## Engineering rules (the seven principles, see architecture.md §11)
+
+1. Make it work first; optimize later.
+2. **Protocol first** — every core module begins as a `typing.Protocol` in `src/coda/<module>/base.py`.
+3. **Safe by default** — deny unless explicitly allowed; dangerous ops always prompt; sensitive files always ignored.
+4. **Day 1 observability** — every tool call gets a trace span; every LLM call records tokens + cost. PRs without trace/log are not merged.
+5. **Git is the safety net** — checkpoint with `git stash create` before every write; `coda undo` restores.
+6. Extract shared abstractions only after a pattern repeats across **three** modules.
+7. **Pin major versions** of LLM/agent core dependencies (`litellm>=1.40,<2`, `anthropic` SDK, etc.). Minor upgrades require a PR review and a passing regression run.
+
+## Code conventions
+
+- Python **3.12+ only**. Use modern syntax: `list[int]`, `int | None`, `match` statements, `@override`.
+- Strict typing: `mypy --strict` must pass with zero errors. No `# type: ignore` without an inline reason.
+- Lint: `ruff check` with rules `E F I N W UP B S ASYNC T20`. **Never use `print()` in `src/`** — use `structlog`.
+- `subprocess.run(shell=True)` is forbidden in production code (bandit S602). If you need shell semantics, go through `coda.sandbox.shell.run()` which validates against the dangerous-command policy.
+- Test layout: `tests/unit/` mirrors `src/coda/`; `tests/integration/` for cross-module tests; `tests/e2e/` for full-loop tests with VCR-recorded LLM responses.
+- Coverage target: ≥ 90% for `coda.core` / `coda.llm`; 100% for `coda.tools` / `coda.sandbox`.
+- All new tools must:
+  1. Define a `pydantic.BaseModel` for arguments.
+  2. Return a `ToolResult` (never raise to the loop).
+  3. Mark `requires_approval` correctly (default = read-only, write/exec = True).
+  4. Have a corresponding entry in `tests/unit/tools/test_<tool>.py` and a recorded VCR cassette in `tests/e2e/`.
+
+## Module dependency rules (enforced via `import-linter` in CI)
+
+- `core` may depend on `llm` / `tools` / `sandbox` / `memory` / `obs`. Never the reverse.
+- `tools` may depend on `sandbox` / `memory` / `obs`. Never on `core`.
+- `cli` and `tui` are thin layers over `core`'s facade — they never construct messages or call LLMs directly.
+
+## Common commands
+
+```bash
+uv sync                        # install / sync deps
+uv run pytest                  # all tests
+uv run pytest tests/unit       # unit only (fast)
+uv run pytest --cov-report=html # coverage report → htmlcov/
+uv run ruff check . --fix      # lint + autofix
+uv run mypy src                # type-check
+uv run python scripts/prototype.py    # Phase 0 prototype (when written)
+```
+
+## When you (the agent) modify this codebase
+
+- Always `read_file` before `edit_file` — never guess file contents.
+- Before any write, describe what you intend to do in plain language.
+- After changes, run the relevant test suite (not the full suite — pick what's affected).
+- If `mypy --strict` fails, fix it in the same edit. Do not push type errors.
+- Use `git_diff` to verify your change before declaring success; do not assume the file was written correctly.
+- Never modify `pyproject.toml` dependency versions without explicit user approval (rule 7).
+- Never modify `LICENSE`, `.gitignore`, or `.github/` without explicit user approval.

@@ -1,0 +1,698 @@
+# Coda — Coding Agent 总体架构设计与技术选型方案
+
+> 版本：v0.1 (Draft) | 日期：2026-05-06
+> 项目代号：Coda | 定位：Local-first Coding Agent CLI
+
+---
+
+## 目录
+
+1. [假设与约束](#1-假设与约束)
+2. [项目目标拆解](#2-项目目标拆解)
+3. [总体架构图](#3-总体架构图)
+4. [技术选型](#4-技术选型)
+5. [MVP 方案](#5-mvp-方案)
+6. [可演进到生产的方案](#6-可演进到生产的方案)
+7. [风险清单](#7-风险清单)
+8. [开发路线图](#8-开发路线图)
+9. [结论与推荐](#9-结论与推荐)
+
+---
+
+## 1. 假设与约束
+
+### 1.1 明确采用的假设
+
+| 维度 | 假设 |
+|------|------|
+| 目标用户 | 先做个人工具，同步开源；社区反馈驱动演进 |
+| 项目类型 | 全语言，初期以 Python/TypeScript 项目为主要测试对象 |
+| LLM 后端 | 优先 Claude API，同时支持 OpenAI；预留多模型切换 |
+| 部署模式 | 本地 CLI 优先，预留 C/S 架构演进空间 |
+| 执行权限 | 默认关键操作需确认，支持信任级别配置（全确认 → 半自动 → 全自动） |
+| 编辑粒度 | MVP 用 search/replace block，后续演进到 diff/patch |
+| 成本关注 | 关注但不极度敏感；必须利用 prompt caching；必须追踪 token 消耗 |
+| MVP 时间 | 1-2 个月做出个人可用的 MVP |
+| 学习目标 | 深入理解 Agent 编排和 LLM 工程化，平衡造轮子与用轮子 |
+| 操作系统 | macOS 优先，Linux 兼容，暂不考虑 Windows |
+
+### 1.2 硬约束
+
+- 不使用任何不可商用或不稳定的依赖
+- 核心循环（用户输入 → LLM 调用 → 工具执行 → 响应）延迟 < 5s（不含 LLM 思考时间）
+- 单次上下文窗口至少支持 128K token
+- 必须支持流式输出（streaming）
+
+---
+
+## 2. 项目目标拆解：核心子系统
+
+### 2.1 子系统一览
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Coda Coding Agent                     │
+├──────────┬──────────┬──────────┬──────────┬─────────────┤
+│   CLI    │  Agent   │  Tool    │  File    │  Security   │
+│ Interface│ Orchestr.│ Executor │ Operation│ & Sandbox   │
+├──────────┼──────────┼──────────┼──────────┼─────────────┤
+│  State   │  LLM     │  Context │  Memory  │  Observ.    │
+│ Manager  │  Gateway │  Manager │ Store    │ & Eval      │
+└──────────┴──────────┴──────────┴──────────┴─────────────┘
+```
+
+### 2.2 各子系统职责
+
+| # | 子系统 | 职责 | 关键接口 |
+|---|--------|------|---------|
+| 1 | **CLI Interface** | 用户输入/输出、命令解析、进度展示、流式渲染、快捷键 | `REPL`, `StreamRenderer` |
+| 2 | **Agent Orchestrator** | ReAct 循环编排、任务规划、工具选择策略、停止条件判断 | `run_loop()`, `plan()`, `should_continue()` |
+| 3 | **LLM Gateway** | 统一 LLM API 调用、模型路由、prompt 组装、tool schema 生成、token 计数、prompt caching | `chat()`, `stream_chat()`, `count_tokens()` |
+| 4 | **Tool Executor** | 工具注册/发现/调度/超时/重试、工具结果格式化 | `register_tool()`, `execute()`, `format_result()` |
+| 5 | **File Operation** | 文件读写、搜索/替换编辑、diff 生成与校验、文件变更追踪 | `read_file()`, `edit_file()`, `apply_diff()` |
+| 6 | **Security & Sandbox** | 权限模型、路径白名单、命令过滤、沙箱执行环境 | `check_permission()`, `sandbox_exec()` |
+| 7 | **Context Manager** | 上下文窗口管理、消息压缩/摘要、相关代码检索、token 预算分配 | `build_messages()`, `compress()`, `retrieve()` |
+| 8 | **State Manager** | 会话状态持久化、检查点/恢复、多会话管理 | `save_state()`, `load_state()`, `checkpoint()` |
+| 9 | **Memory Store** | 跨会话记忆（项目知识、用户偏好、历史决策）、长期记忆检索 | `remember()`, `recall()`, `forget()` |
+| 10 | **Observability & Eval** | 结构化日志、token/成本追踪、执行 trace、评估指标、调试回放 | `trace()`, `log()`, `evaluate()` |
+
+---
+
+## 3. 总体架构图
+
+### 3.1 分层架构（Mermaid）
+
+```mermaid
+graph TB
+    subgraph "用户交互层 [Presentation]"
+        CLI[CLI Interface<br/>REPL / Stream Renderer]
+        UI_FLAGS[Config & Flags<br/>--model --trust --verbose]
+    end
+
+    subgraph "Agent 编排层 [Orchestration]"
+        ORCH[Agent Orchestrator<br/>ReAct Loop / Plan & Execute]
+        PLAN[Task Planner<br/>Decomposition / Priority]
+        ROUTER[Tool Router<br/>Selection & Dispatch]
+    end
+
+    subgraph "LLM 抽象层 [LLM Gateway]"
+        LLM_API[LLM API Client<br/>Claude / OpenAI / Local]
+        PROMPT[Prompt Builder<br/>System / Context / Tools Schema]
+        CACHE[Cache Manager<br/>Prompt Caching / Response Cache]
+        TOKEN[Token Counter<br/>Budget Allocation]
+    end
+
+    subgraph "工具执行层 [Tool Execution]"
+        TOOL_REG[Tool Registry<br/>Discovery & Validation]
+        TOOL_EXEC[Tool Executor<br/>Dispatch / Timeout / Retry]
+        TOOLS[Tool Implementations<br/>ReadFile / EditFile / Shell / Grep / Glob ...]
+    end
+
+    subgraph "文件/代码操作层 [File Operations]"
+        FILE_RW[File Reader/Writer<br/>Read / Write / Search-Replace]
+        DIFF[Diff Engine<br/>Generate / Apply / Validate]
+        VCS[Git Integration<br/>Status / Diff / Commit / Branch]
+    end
+
+    subgraph "上下文与记忆层 [Context & Memory]"
+        CTX[Context Manager<br/>Window Management / Compression]
+        RETRIEVE[Code Retriever<br/>Semantic Search / AST Index]
+        MEM[Memory Store<br/>Project Knowledge / User Prefs]
+    end
+
+    subgraph "沙箱/权限控制层 [Security]"
+        PERM[Permission Manager<br/>Trust Levels / ACL]
+        SANDBOX[Sandbox Executor<br/>Docker / nsjail / macOS Seatbelt]
+        AUDIT[Audit Logger<br/>All Tool Calls / File Changes]
+    end
+
+    subgraph "状态与可观测层 [State & Observability]"
+        STATE[State Manager<br/>Session Persistence / Checkpoint]
+        TRACE[Trace Collector<br/>OpenTelemetry / Structured Log]
+        EVAL[Evaluation Framework<br/>Success Rate / Cost / Latency]
+    end
+
+    CLI --> ORCH
+    UI_FLAGS --> ORCH
+    ORCH --> PLAN
+    ORCH --> ROUTER
+    ORCH --> LLM_API
+    ROUTER --> TOOL_REG
+    TOOL_REG --> TOOL_EXEC
+    TOOL_EXEC --> TOOLS
+    TOOLS --> FILE_RW
+    TOOLS --> SANDBOX
+    FILE_RW --> DIFF
+    FILE_RW --> VCS
+    ORCH --> CTX
+    CTX --> RETRIEVE
+    CTX --> MEM
+    LLM_API --> PROMPT
+    LLM_API --> CACHE
+    LLM_API --> TOKEN
+    PERM --> SANDBOX
+    PERM --> TOOL_EXEC
+    STATE --> ORCH
+    TRACE --> ORCH
+    TRACE --> TOOL_EXEC
+    EVAL --> TRACE
+    AUDIT --> TOOL_EXEC
+    AUDIT --> FILE_RW
+```
+
+### 3.2 核心循环流程
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant CLI as CLI Interface
+    participant ORCH as Orchestrator
+    participant LLM as LLM Gateway
+    participant CTX as Context Manager
+    participant TOOL as Tool Executor
+    participant SEC as Security Layer
+    participant FS as File System
+    participant LOG as Observability
+
+    U->>CLI: 输入指令
+    CLI->>ORCH: user_message(instruction)
+    ORCH->>CTX: build_messages(instruction)
+    CTX-->>ORCH: messages[]
+
+    loop ReAct Loop (max N turns)
+        ORCH->>LLM: stream_chat(messages, tools)
+        LLM-->>ORCH: stream_response (text + tool_calls)
+        ORCH->>CLI: stream_text_to_user(text)
+
+        alt LLM 请求调用工具
+            ORCH->>SEC: check_permission(tool_call)
+            alt 权限允许
+                SEC-->>ORCH: approved
+            else 需要确认
+                SEC->>CLI: prompt_user_confirmation(tool_call)
+                CLI->>SEC: user_decision
+                SEC-->>ORCH: approved/denied
+            end
+
+            alt approved
+                ORCH->>TOOL: execute(tool_call)
+                TOOL->>FS: perform_operation
+                FS-->>TOOL: result
+                TOOL-->>ORCH: tool_result
+                ORCH->>CTX: append_assistant_and_tool_result
+                ORCH->>LOG: trace(tool_call, result, tokens, latency)
+            else denied
+                ORCH->>CTX: append_permission_denied
+            end
+        else LLM 输出纯文本（无工具调用）
+            ORCH-->>CLI: final_response
+        end
+    end
+
+    CLI-->>U: 显示最终结果
+    ORCH->>LOG: log_session_summary(tokens, cost, duration)
+```
+
+---
+
+## 4. 技术选型
+
+### 4.1 主语言选择：Python
+
+| 维度 | Python | Node.js/TypeScript | Go | Rust |
+|------|--------|--------------------|----|------|
+| **你/团队熟悉度** | 高 | 中 | 中低 | 低 |
+| **LLM SDK 生态** | 最优（官方 SDK 全，原生支持） | 优（官方 SDK 全） | 中（社区 SDK） | 弱（几乎无官方） |
+| **CLI 框架** | 优（Click, Typer, Rich） | 优（Commander, Inquirer） | 优（Cobra） | 中（Clap） |
+| **流式输出** | 优（原生 async, SSE） | 优（原生 async, SSE） | 优 | 中 |
+| **异步/并发** | 优（asyncio，够用） | 优（事件循环） | 优（goroutine） | 优（tokio） |
+| **工具调用抽象** | 优（Pydantic 验证 + 装饰器） | 优（Zod 验证） | 中（手动 JSON Schema） | 弱（大量手动） |
+| **文件操作** | 优 | 优 | 优 | 优 |
+| **进程管理/沙箱** | 中（subprocess + docker SDK） | 中（child_process） | 优（os/exec） | 优（ Command） |
+| **学习曲线** | 低（你已熟悉） | 中 | 中高 | 高 |
+| **开源生态/复用** | 极优（最大生态） | 优 | 中 | 弱 |
+| **性能天花板** | 中（足够 CLI 场景） | 中高 | 高 | 极高 |
+| **编码速度(MVP)** | 最快 | 快 | 中 | 慢 |
+
+#### 结论
+
+**主语言：Python 3.12+**
+- 理由 1：LLM API 生态最强，Anthropic/OpenAI 官方 SDK 都是 Python-first
+- 理由 2：你的主要语言，开发速度最快
+- 理由 3：Pydantic 做数据校验和 JSON Schema 生成极其适合 tool calling 场景
+- 理由 4：asyncio + httpx 做流式输出完全够用
+- 理由 5：Claude Code 是 TS 写的，Aider/SWE-agent/OpenHands 都是 Python——Python 在 coding agent 赛道有最多参考实现
+
+**辅助语言：Rust（长期）/ 暂不引入**
+- MVP 阶段不需要。未来如果需要高性能 diff 计算、AST 解析、大文件处理，可引入 Rust 做 Python 扩展（PyO3）
+- Go 的优势在网络服务和并发，但 coding agent CLI 场景不需要
+
+### 4.2 Agent 框架选择
+
+| 方案 | 优点 | 缺点 | 推荐度 |
+|------|------|------|--------|
+| **直接用 Anthropic/OpenAI SDK + 手写 ReAct 循环** | 完全控制、理解原理、无黑盒、最轻量 | 需要自己写编排逻辑 | **主推** |
+| Pydantic AI | 类型安全、代码优雅、学习价值高 | 较新、社区小、对 tool calling 循环控制有限 | 备选 |
+| LangGraph | 成熟、可视化、复杂状态机 | 过重、抽象层多、调试难、版本不稳定 | 不推荐 MVP |
+| Smolagents | 极简、HuggingFace 出品 | 太简陋、生态小 | 参考，不采用 |
+| OpenAI Agents SDK | 官方出品 | 绑定 OpenAI、不够灵活 | 不推荐 |
+
+#### 结论：手写 ReAct 循环
+
+这是学习价值最高的方案，也是最务实的方案。核心循环代码量不大（~300-500 行），但你能完全理解每一层。
+
+架构参考：
+- Claude Code：工具调用循环 + 流式输出 + 信任级别
+- Aider：简洁的 ReAct loop + git 集成
+- SWE-agent：bash-centric 的工具接口设计
+
+### 4.3 核心依赖选型
+
+| 层次 | 选型 | 理由 | 备选 |
+|------|------|------|------|
+| **CLI 框架** | `Typer` + `Rich` + `Prompt Toolkit` | Typer 声明式 CLI + Rich 美化输出 + Prompt Toolkit 做 REPL 交互 | Click（更成熟但更啰嗦） |
+| **LLM SDK** | `anthropic` SDK + `openai` SDK | 官方 SDK，流式支持完善，tool calling 原生 | litellm（统一接口，但多一层抽象） |
+| **数据校验** | `Pydantic v2` | JSON Schema 生成（用于 tool definition）、数据验证、settings 管理 | dataclasses（无 Schema 生成） |
+| **异步 HTTP** | `httpx` (async) | 流式 SSE、超时控制、连接池 | aiohttp |
+| **配置管理** | `pydantic-settings` | .env + YAML + 环境变量统一管理 | Hydra（过重） |
+| **日志** | `structlog` + `loguru` | 结构化日志，方便 trace 和 eval | 标准 logging（不够结构化） |
+| **文件 diff** | `unified_diff` (stdlib) + `whatthepatch` | 标准库足够 MVP | difflib + 自定义 |
+| **Git 操作** | `gitpython` | Pythonic git 操作 | subprocess 调 git（更可靠但更丑） |
+| **AST/语法** | `tree-sitter` (Python binding) | 多语言 AST 解析，语法感知编辑基础 | 各语言专用 parser |
+| **语义搜索** | 暂不引入，MVP 后考虑 `sqlite-vss` 或 `lance-db` | 避免过早复杂化 | chromadb |
+| **测试** | `pytest` + `pytest-asyncio` | 标准选择 | — |
+| **打包分发** | `pyproject.toml` + `uv` / `pip` | 现代 Python 打包 | Poetry（也可） |
+
+### 4.4 技术选型总结表
+
+| 决策点 | 选择 | 理由一句话 |
+|--------|------|-----------|
+| 主语言 | Python 3.12+ | LLM 生态最强 + 你最熟悉 + coding agent 参考实现最多 |
+| 辅助语言 | 暂不引入（未来可选 Rust via PyO3） | MVP 不需要，避免增加复杂度 |
+| Agent 框架 | 手写 ReAct 循环 | 学习价值最高 + 完全控制 + 代码量可控 |
+| CLI 框架 | Typer + Rich + Prompt Toolkit | 声明式 + 美化 + REPL 交互 |
+| LLM SDK | anthropic + openai（双 SDK） | 官方 SDK 最可靠 |
+| 数据层 | Pydantic v2 | Tool Schema 生成 + 配置管理 |
+| 日志/追踪 | structlog + 自定义 trace | 结构化 + 可演进到 OpenTelemetry |
+| 包管理 | uv | 最快的 Python 包管理器 |
+| 测试 | pytest | 标准选择 |
+
+---
+
+## 5. MVP 方案
+
+### 5.1 MVP 功能范围
+
+#### 必须有（Must Have）
+
+| 功能 | 描述 | 预估复杂度 |
+|------|------|-----------|
+| **CLI REPL** | 交互式对话，支持流式输出 | 中 |
+| **单轮对话** | 用户提问 → LLM 思考 → 返回答案 | 低 |
+| **文件读取** | 读取项目文件内容，展示给 LLM | 低 |
+| **文件编辑** | 通过 search/replace block 修改文件 | 中 |
+| **Shell 执行** | 执行 shell 命令并返回结果 | 中 |
+| **Grep 搜索** | 在项目中搜索代码片段 | 低 |
+| **文件列表** | 列出目录结构、glob 模式匹配 | 低 |
+| **基本权限** | 危险操作需用户确认（文件写入、命令执行） | 中 |
+| **会话历史** | 当前会话内的上下文保持 | 低 |
+| **Token 追踪** | 显示 token 消耗和预估成本 | 低 |
+| **流式输出** | LLM 响应实时流式展示 | 中 |
+| **配置文件** | 支持 .coda/config.yaml 基本配置 | 低 |
+| **Git 状态** | 展示当前 git diff、uncommitted changes | 低 |
+
+#### 应该有（Should Have）
+
+| 功能 | 描述 |
+|------|------|
+| **多模型切换** | 运行时切换 Claude/GPT |
+| **会话保存/恢复** | 保存对话历史，下次可继续 |
+| **Prompt Caching** | 利用 Anthropic prompt caching 降低成本 |
+| **自动 Git Commit** | 工具修改后自动 commit（可选） |
+| **Verbose 模式** | 展示 LLM 的工具调用过程 |
+
+#### 不应该有（Won't Have in MVP）
+
+| 功能 | 为什么不做 |
+|------|----------|
+| **沙箱执行** | 复杂度高，MVP 用权限确认替代；Phase 3 引入 |
+| **语义搜索/RAG** | 需要 embedding 服务，MVP 用 grep 替代 |
+| **多 Agent 协作** | 单 Agent 够用，过早引入增加复杂度 |
+| **插件系统** | MVP 先硬编码工具，验证核心循环后再抽象 |
+| **Web UI** | CLI 优先 |
+| **评估框架** | Phase 3 引入 |
+| **长期记忆** | Phase 2 引入 |
+| **AST 感知编辑** | 复杂度高，MVP 用文本级 search/replace |
+| **多会话并行** | 过早优化 |
+| **自定义工具注册** | Phase 2 引入 |
+
+### 5.2 MVP 工具定义（Tool Schema）
+
+MVP 阶段定义以下工具，每个工具用 Pydantic Model 定义参数 Schema，自动生成 LLM tool definition：
+
+```python
+tools = [
+    ReadFile(path: str, offset?: int, limit?: int),      # 读取文件
+    WriteFile(path: str, content: str),                   # 写入/创建文件
+    EditFile(path: str, old_string: str, new_string: str),# 搜索替换编辑
+    ListFiles(path: str, pattern?: str),                  # 列出文件
+    SearchCode(pattern: str, path?: str, file_type?: str),# 搜索代码
+    ShellExec(command: str, timeout?: int),               # 执行命令
+    GitStatus(),                                          # Git 状态
+    GitDiff(path?: str),                                  # Git diff
+]
+```
+
+### 5.3 MVP 目录结构
+
+```
+coda/
+├── pyproject.toml              # 项目元数据、依赖
+├── README.md
+├── .coda/
+│   └── config.yaml             # 默认配置
+├── src/
+│   └── coda/
+│       ├── __init__.py
+│       ├── cli/                # CLI 交互层
+│       │   ├── __init__.py
+│       │   ├── main.py         # 入口点 (typer app)
+│       │   ├── repl.py         # REPL 循环
+│       │   └── renderer.py     # 流式输出渲染
+│       ├── agent/              # Agent 编排层
+│       │   ├── __init__.py
+│       │   ├── orchestrator.py # ReAct 主循环
+│       │   ├── planner.py      # 任务规划（MVP 简化）
+│       │   └── types.py        # Message, ToolCall, ToolResult
+│       ├── llm/                # LLM 抽象层
+│       │   ├── __init__.py
+│       │   ├── base.py         # LLMProvider 抽象基类
+│       │   ├── anthropic.py    # Claude 实现
+│       │   ├── openai.py       # OpenAI 实现
+│       │   ├── prompt.py       # System prompt 构建
+│       │   └── token.py        # Token 计数/预算
+│       ├── tools/              # 工具执行层
+│       │   ├── __init__.py
+│       │   ├── registry.py     # 工具注册表
+│       │   ├── base.py         # Tool 基类
+│       │   ├── file_read.py
+│       │   ├── file_edit.py
+│       │   ├── file_write.py
+│       │   ├── list_files.py
+│       │   ├── search.py
+│       │   ├── shell.py
+│       │   └── git.py
+│       ├── context/            # 上下文管理
+│       │   ├── __init__.py
+│       │   ├── manager.py      # 上下文构建/压缩
+│       │   └── budget.py       # Token 预算分配
+│       ├── security/           # 安全层
+│       │   ├── __init__.py
+│       │   ├── permissions.py  # 权限检查
+│       │   └── policy.py       # 信任策略
+│       ├── state/              # 状态管理
+│       │   ├── __init__.py
+│       │   └── session.py      # 会话状态
+│       └── observability/      # 可观测性
+│           ├── __init__.py
+│           ├── logger.py       # 结构化日志
+│           └── trace.py        # 执行追踪
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   └── e2e/
+└── docs/
+    └── ARCHITECTURE_DESIGN.md  # 本文档
+```
+
+---
+
+## 6. 可演进到生产的方案
+
+### 6.1 模块拆分策略
+
+```
+Phase 1 (MVP)          Phase 2              Phase 3              Phase 4
+─────────────         ──────────           ──────────           ──────────
+┌──────────┐         ┌──────────┐         ┌──────────┐         ┌──────────┐
+│  Monolith │──►     │ Modular  │──►     │ Service- │──►     │ Platform │
+│  (single  │        │ (clean   │         │ Oriented │         │ (multi-  │
+│  process) │        │  boundaries)│      │ (separate│         │  tenant, │
+│           │        │          │         │  sandbox) │         │  cloud)  │
+└──────────┘         └──────────┘         └──────────┘         └──────────┘
+```
+
+### 6.2 各模块演进方向
+
+| 模块 | MVP (Phase 1) | Phase 2 | Phase 3 | Phase 4 (生产级) |
+|------|---------------|---------|---------|-----------------|
+| **CLI** | 单体 REPL | 增强 UX（语法高亮、diff 预览） | 同左 | Web UI / IDE 插件 |
+| **Agent 编排** | 单循环 | 支持 Plan-and-Execute | 多 Agent 协作 | 分布式 Agent 调度 |
+| **LLM Gateway** | 双 SDK 直调 | 多模型路由 + fallback | 本地模型支持 | 自托管模型 + GPU 调度 |
+| **工具系统** | 硬编码工具 | 插件注册 + 第三方工具 | 沙箱化工具执行 | 工具市场 |
+| **文件操作** | search/replace | diff/patch + tree-sitter | AST 感知编辑 | LSP 集成 |
+| **上下文管理** | 简单消息列表 | 智能压缩 + 摘要 | RAG + 语义检索 | 知识图谱 |
+| **安全** | 用户确认 | 信任级别 + 路径白名单 | Docker 沙箱 | gVisor/Firecracker |
+| **状态** | 内存 | SQLite 持久化 | 检查点/回滚 | 分布式状态 |
+| **记忆** | 无 | 文件级记忆 | 向量存储 + 长期记忆 | 知识库 |
+| **可观测** | print + structlog | OpenTelemetry trace | 评估框架 | 评估 + 主动学习 |
+
+### 6.3 哪些模块可以独立成服务
+
+**可以拆分（有明确边界、独立扩展价值）：**
+
+1. **LLM Gateway Service** — 统一 LLM 调用，可以做限流、缓存、路由、成本统计。适合独立部署，多客户端共享。
+2. **Sandbox Service** — Docker 容器管理服务，独立的执行环境，可以水平扩展。
+3. **Code Index Service** — 代码索引/语义搜索服务，计算密集，适合独立部署。
+4. **Evaluation Service** — 评估/回归测试服务，独立运行评估任务。
+
+**应保持单体（边界模糊、拆分开销大）：**
+
+1. **Agent Orchestrator** — 核心循环必须低延迟，拆成服务增加网络开销。
+2. **Context Manager** — 与 Agent 编排紧耦合，拆分收益低。
+3. **Tool Registry** — 与执行流程紧耦合，拆分增加复杂度。
+4. **CLI Interface** — 天然单体，不存在拆分场景。
+
+### 6.4 接口设计原则
+
+为每个模块定义清晰的 Python Protocol（接口类），即使 MVP 阶段只有一个实现：
+
+```python
+from typing import Protocol, AsyncIterator
+
+class LLMProvider(Protocol):
+    async def chat(self, messages: list[Message], tools: list[ToolDef]) -> LLMResponse: ...
+    async def stream_chat(self, messages: list[Message], tools: list[ToolDef]) -> AsyncIterator[LLMChunk]: ...
+    def count_tokens(self, text: str) -> int: ...
+
+class Tool(Protocol):
+    name: str
+    description: str
+    parameters: type[BaseModel]  # Pydantic model -> JSON Schema
+
+    async def execute(self, params: dict) -> ToolResult: ...
+
+class ContextManager(Protocol):
+    def build_messages(self, user_input: str) -> list[Message]: ...
+    def add_assistant_message(self, message: Message) -> None: ...
+    def add_tool_result(self, result: ToolResult) -> None: ...
+    def compress_if_needed(self) -> None: ...
+
+class SecurityPolicy(Protocol):
+    def check_permission(self, tool_call: ToolCall) -> PermissionDecision: ...
+```
+
+---
+
+## 7. 风险清单
+
+### 7.1 技术风险
+
+| 风险 | 影响 | 概率 | 缓解策略 |
+|------|------|------|---------|
+| **LLM 幻觉导致错误代码修改** | 高 | 高 | 所有修改前展示 diff 预览 + 用户确认；自动 git commit 可回滚 |
+| **上下文窗口溢出** | 高 | 中 | Token 预算系统；智能摘要压缩；按需加载文件（非全量） |
+| **Tool calling 格式不稳定** | 中 | 中 | 严格验证 LLM 输出格式；重试机制；graceful degradation |
+| **Python 性能瓶颈** | 低 | 低 | CLI 场景瓶颈在 LLM API 延迟，不在本地计算；真正需要时用 Rust 扩展 |
+| **流式输出解析错误** | 中 | 低 | 完善的 SSE 解析器；异常恢复；fallback 到非流式 |
+
+### 7.2 安全风险
+
+| 风险 | 影响 | 概率 | 缓解策略 |
+|------|------|------|---------|
+| **LLM 执行恶意命令** | 极高 | 中 | 默认所有 shell 命令需确认；路径白名单；命令黑名单（rm -rf / 等） |
+| **路径穿越攻击** | 高 | 中 | 所有文件操作必须 resolve 到项目根目录内；禁止 ../ 跳出 |
+| **敏感文件泄露** | 高 | 中 | .codaignore 排除 .env、credentials 等；敏感文件检测 |
+| **Prompt Injection** | 高 | 中 | 系统提示标记不可信输入；工具输出隔离；日志审计 |
+| **依赖供应链攻击** | 中 | 低 | 锁定依赖版本；定期审计 (pip-audit) |
+
+### 7.3 体验风险
+
+| 风险 | 影响 | 概率 | 缓解策略 |
+|------|------|------|---------|
+| **响应延迟感强** | 高 | 高 | 流式输出；思考过程可视化；进度指示器 |
+| **用户不知道 Agent 在做什么** | 高 | 中 | verbose 模式展示工具调用；实时状态提示 |
+| **错误恢复困难** | 高 | 中 | 自动 git checkpoint；undo 命令；清晰的错误信息 |
+| **上下文丢失导致质量下降** | 中 | 高 | 智能上下文管理；长期记忆；项目知识库 |
+
+### 7.4 成本风险
+
+| 风险 | 影响 | 概率 | 缓解策略 |
+|------|------|------|---------|
+| **Token 消耗过高** | 高 | 高 | Prompt caching；token 预算系统；上下文压缩；成本追踪与告警 |
+| **API 不稳定/限流** | 中 | 中 | 多模型 fallback；指数退避重试；请求队列 |
+| **API 定价变更** | 中 | 低 | 抽象 LLM Provider 接口；可随时切换模型 |
+
+### 7.5 维护风险
+
+| 风险 | 影响 | 概率 | 缓解策略 |
+|------|------|------|---------|
+| **LLM API 变更** | 中 | 中 | Provider 抽象层隔离变更；适配器模式 |
+| **项目规模增长过快** | 中 | 中 | 严格模块边界；持续重构；不过早抽象 |
+| **测试覆盖不足** | 高 | 中 | 从 Day 1 写测试；集成测试覆盖核心循环；mock LLM 做单元测试 |
+
+---
+
+## 8. 开发路线图
+
+### Phase 0：验证想法（1 周）
+
+**目标：** 用最简代码跑通 LLM → Tool Call → 执行 → 结果反馈的完整链路。
+
+| 任务 | 产出 | 验收标准 |
+|------|------|---------|
+| 0.1 初始化项目 | pyproject.toml + uv 虚拟环境 | `uv run coda --help` 能运行 |
+| 0.2 最简 LLM 调用 | anthropic SDK 调用 + 流式输出 | 能打印 Claude 的流式回复 |
+| 0.3 Tool Calling 原型 | 定义 1 个 ReadFile 工具 + 解析 tool_call | LLM 能调用 ReadFile 并获得文件内容 |
+| 0.4 ReAct 单循环 | 单次 tool call → 结果反馈 → LLM 继续 | 能完成 "读取某文件并解释" 的任务 |
+| 0.5 项目骨架 | 按目录结构创建所有模块文件（带 TODO） | `import coda` 不报错 |
+
+**Phase 0 产出约 500-800 行代码。**
+
+### Phase 1：做出可用 CLI（3 周）
+
+**目标：** 做出个人可用的 CLI coding agent。
+
+| 任务 | 产出 | 验收标准 |
+|------|------|---------|
+| 1.1 REPL 交互 | Prompt Toolkit REPL + 流式渲染 | 能多轮对话 |
+| 1.2 完整工具集 | ReadFile, EditFile, WriteFile, ListFiles, Search, ShellExec, GitStatus | 所有工具可用 |
+| 1.3 权限确认 | 危险操作 (写文件/执行命令) 需确认 | 未经确认不执行 |
+| 1.4 上下文管理 | 基本消息历史 + token 计数 | 不超窗口限制 |
+| 1.5 System Prompt | 精心设计的系统提示 | Agent 行为符合预期 |
+| 1.6 配置系统 | .coda/config.yaml + 环境变量 | 可配置模型、信任级别 |
+| 1.7 会话状态 | 会话保存到 JSON 文件 | 重启后可恢复 |
+| 1.8 Token/Cost 追踪 | 每次对话后显示 token 消耗 | 知道花了多少钱 |
+| 1.9 基本测试 | 单元测试 + 集成测试 | pytest 通过 |
+| 1.10 打包安装 | pip/uv 可安装 | `uv tool install coda` |
+
+**Phase 1 产出约 2000-3000 行代码。**
+
+### Phase 2：增强代码理解与编辑能力（3-4 周）
+
+**目标：** 从"能改文件"进化到"懂代码"。
+
+| 任务 | 产出 |
+|------|------|
+| 2.1 智能上下文管理 | 相关文件自动检索、token 预算优化 |
+| 2.2 Diff 预览 | 修改前展示 colored diff，用户确认后应用 |
+| 2.3 Git 集成增强 | 自动 commit、branch 管理、回滚 |
+| 2.4 多模型切换 | 运行时 `--model` 切换，配置默认模型 |
+| 2.5 Prompt Caching | 利用 Anthropic prompt caching 降低成本 |
+| 2.6 长期记忆 | 项目级记忆文件 (.coda/memory/)，跨会话保持 |
+| 2.7 插件化工具 | 第三方工具注册接口 |
+| 2.8 上下文压缩 | 消息摘要、历史压缩、关键信息保留 |
+| 2.9 Tree-sitter 集成 | 基础 AST 解析，支持函数/类级别操作 |
+
+### Phase 3：安全与评估（3-4 周）
+
+**目标：** 从"能用"到"敢用"。
+
+| 任务 | 产出 |
+|------|------|
+| 3.1 沙箱执行 | Docker 容器内执行 shell 命令 |
+| 3.2 细粒度权限 | 路径白名单、命令黑白名单、信任级别 |
+| 3.3 审计日志 | 所有操作的完整审计 trail |
+| 3.4 评估框架 | SWE-bench 评估 + 自定义 benchmark |
+| 3.5 错误恢复 | 自动 checkpoint + undo + 重试策略 |
+| 3.6 安全加固 | .codaignore、敏感文件检测、prompt injection 防御 |
+| 3.7 结构化追踪 | OpenTelemetry 兼容的 trace 系统 |
+
+### Phase 4：走向生产级（持续演进）
+
+**目标：** 从"个人工具"到"团队/社区产品"。
+
+| 任务 | 产出 |
+|------|------|
+| 4.1 LSP 集成 | 与 Language Server Protocol 集成，精准代码理解 |
+| 4.2 多 Agent 协作 | 规划 Agent + 编码 Agent + 审查 Agent |
+| 4.3 IDE 插件 | VS Code / JetBrains 扩展 |
+| 4.4 Web UI | 基于 Web 的交互界面 |
+| 4.5 团队协作 | 共享配置、共享记忆、团队评估 |
+| 4.6 本地模型支持 | Ollama / vLLM 集成 |
+| 4.7 插件市场 | 社区贡献的工具和插件 |
+
+---
+
+## 9. 结论与推荐
+
+### 9.1 明确结论
+
+| 决策点 | 推荐方案 | 理由 |
+|--------|---------|------|
+| **主语言** | **Python 3.12+** | LLM 生态最强、你最熟悉、coding agent 参考实现最多、Pydantic 天然适合 tool schema |
+| **辅助语言** | **暂不引入**，未来可选 Rust (PyO3) 做性能关键模块 | MVP 不需要额外语言；未来瓶颈最可能在 diff/AST 计算，Rust 是最佳扩展语言 |
+| **架构风格** | **单体模块化 (Modular Monolith)** | CLI 场景不需要微服务；清晰的模块边界确保未来可拆分；参考 Claude Code 和 Aider 的单体架构 |
+| **Agent 模式** | **手写 ReAct 循环** | 代码量可控 (~300-500 行核心)、学习价值最高、完全控制、无框架黑盒 |
+
+### 9.2 优先做的模块（按顺序）
+
+1. **LLM Gateway** ( anthropic SDK 封装 + 流式) — 一切的基石
+2. **Tool Registry + 基础工具** (ReadFile, EditFile, ShellExec) — Agent 的手
+3. **Agent Orchestrator** (ReAct 循环) — Agent 的大脑
+4. **CLI REPL** (Typer + Rich + Prompt Toolkit) — 用户的入口
+5. **Context Manager** (消息构建 + token 预算) — 让 Agent 不失忆
+6. **Security / Permissions** (确认机制) — 让用户敢用
+
+### 9.3 暂时不做的模块
+
+| 模块 | 什么时候做 | 为什么不做 |
+|------|----------|----------|
+| 沙箱执行 | Phase 3 | 复杂度高，MVP 用权限确认替代 |
+| 语义搜索/RAG | Phase 2-3 | MVP 用 grep 足够；embedding 服务增加依赖 |
+| 多 Agent 协作 | Phase 4 | 单 Agent 是一切的基础，过早引入增加复杂度 |
+| 插件系统 | Phase 2 | 先硬编码验证核心循环，再抽象注册接口 |
+| AST 感知编辑 | Phase 2 | tree-sitter 集成有成本，文本级编辑够用 |
+| 评估框架 | Phase 3 | 先有功能，再评估质量 |
+| Web UI / IDE 插件 | Phase 4 | CLI 是核心，UI 是锦上添花 |
+| 本地模型支持 | Phase 4 | 初期用商业 API 质量更可靠 |
+
+### 9.4 关键设计原则
+
+1. **先跑通再优化** — Phase 0 用 500 行代码验证核心假设（LLM tool calling 循环）
+2. **模块边界清晰** — 每个模块定义 Protocol 接口，即使只有一个实现
+3. **安全默认保守** — 默认拒绝，用户显式授权
+4. **可观测从 Day 1** — 每个工具调用都记录 trace
+5. **Git 是你的安全网** — 每次修改前 git stash / commit，永远可回滚
+6. **不过早抽象** — 三次重复再提取，不为假设的未来需求设计
+
+### 9.5 你现在就可以做的第一步
+
+```bash
+# 1. 创建项目
+mkdir -p coda && cd coda
+uv init --name coda --python 3.12
+
+# 2. 添加核心依赖
+uv add anthropic openai typer rich prompt-toolkit pydantic pydantic-settings httpx structlog
+
+# 3. 添加开发依赖
+uv add --dev pytest pytest-asyncio pytest-mock ruff mypy
+
+# 4. 验证
+uv run python -c "import anthropic; print('OK')"
+```
+
+---
+
+> **Next Step：** 确认本方案后，我可以立即开始 Phase 0 的实现——从项目骨架到第一个 ReAct 循环原型。
