@@ -487,3 +487,76 @@ async def test_loop_handles_bad_json_tool_call(tmp_path: Path) -> None:
     ).run("do something")
     # Should retry or abort gracefully — not crash
     assert result.final_text is not None
+
+
+# ---------------------------------------------------------------------------
+# abort_reason field — M4.5 additions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_abort_reason_denied(tmp_path: Path) -> None:
+    """TurnResult.abort_reason == 'denied' when the user denies a tool call."""
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+
+    tool_call = ToolCall(id="tc-deny", name="echo", arguments={"message": "x"})
+    provider = _FakeLLMProvider([Message(role="assistant", content="", tool_calls=[tool_call])])
+
+    result = await AgentLoop(
+        provider=provider,
+        registry=registry,
+        tool_ctx=_ctx(tmp_path),
+        approval=_DenyAllManager(),
+    ).run("do it")
+
+    assert result.aborted_by_user
+    assert result.abort_reason == "denied"
+
+
+@pytest.mark.asyncio
+async def test_abort_reason_stall(tmp_path: Path) -> None:
+    """TurnResult.abort_reason == 'stall' when the StallDetector triggers."""
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+
+    # Provider keeps returning the same write-class tool call → stall after 3x
+    tool_call = ToolCall(id="tc-stall", name="echo", arguments={"message": "stall"})
+    provider = _FakeLLMProvider(
+        [Message(role="assistant", content="", tool_calls=[tool_call])] * 10
+    )
+
+    # Patch StallDetector to treat 'echo' as a write tool for this test
+    from coda.core import recovery as _recovery  # noqa: PLC0415
+
+    original = _recovery._WRITE_TOOLS
+    _recovery._WRITE_TOOLS = frozenset({"echo"})
+    try:
+        result = await AgentLoop(
+            provider=provider,
+            registry=registry,
+            tool_ctx=_ctx(tmp_path),
+            approval=_AutoApprovalManager(),
+        ).run("loop")
+    finally:
+        _recovery._WRITE_TOOLS = original
+
+    assert result.aborted_by_user
+    assert result.abort_reason == "stall"
+
+
+@pytest.mark.asyncio
+async def test_abort_reason_bad_json_exhausted(tmp_path: Path) -> None:
+    """abort_reason == 'bad_json' after 2 bad-json retries are exhausted."""
+    bad_tc = ToolCall(id="tc-bad", name="echo", arguments={"_raw": "NOT_JSON"})
+    # All responses are bad-JSON → retries exhaust → abort
+    provider = _FakeLLMProvider([Message(role="assistant", content="", tool_calls=[bad_tc])] * 5)
+    result = await AgentLoop(
+        provider=provider,
+        registry=ToolRegistry(),
+        tool_ctx=_ctx(tmp_path),
+        approval=_AutoApprovalManager(),
+    ).run("bad")
+
+    assert result.aborted_by_user
+    assert result.abort_reason == "bad_json"

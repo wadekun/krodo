@@ -24,6 +24,7 @@ from pathlib import Path
 import typer
 
 from coda.cli.banner import print_banner
+from coda.cli.doctor import register_doctor_app
 from coda.cli.undo import register_undo_app
 from coda.core.budget import BudgetCalculator, get_context_window
 from coda.core.compression import make_compressor
@@ -32,7 +33,7 @@ from coda.core.events import SessionEventLogger
 from coda.core.loop import AgentLoop, LoopConfig
 from coda.core.workspace import LocalWorkspaceResolver
 from coda.llm.litellm_provider import LiteLLMProvider
-from coda.obs.logger import configure_logging
+from coda.obs.logger import configure_logging, get_session_log_path
 from coda.sandbox.approval import TerminalApprovalManager
 from coda.sandbox.checkpoint import GitCheckpointManager
 from coda.sandbox.firewall import LocalSandboxRunner
@@ -55,6 +56,7 @@ app = typer.Typer(
 
 # Register sub-commands (add_typer does not change the main callback behaviour)
 register_undo_app(app)
+register_doctor_app(app)
 
 _DEFAULT_MODEL = "anthropic/claude-3-5-sonnet-20241022"
 
@@ -138,6 +140,39 @@ def main(
             summary_window=summary_window,
         )
     )
+
+
+def _collect_written_paths(log_path: object) -> list[str]:
+    """Return deduplicated file paths from CHECKPOINT events in the session log.
+
+    Reads the JSONL log after the session ends.  Returns an empty list if the
+    log is missing or unparseable.
+    """
+    import json as _json  # noqa: PLC0415
+    from pathlib import Path as _Path  # noqa: PLC0415
+
+    paths: list[str] = []
+    seen: set[str] = set()
+    try:
+        lp = _Path(str(log_path))
+        if not lp.exists():
+            return paths
+        for raw in lp.read_text(encoding="utf-8", errors="replace").splitlines():
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                obj = _json.loads(raw)
+            except _json.JSONDecodeError:
+                continue
+            if obj.get("type") == "checkpoint":
+                for p in obj.get("data", {}).get("affected_paths", []):
+                    if p not in seen:
+                        seen.add(p)
+                        paths.append(p)
+    except OSError:
+        pass
+    return paths
 
 
 async def _async_main(
@@ -271,15 +306,37 @@ async def _async_main(
     # 6. Run
     result = await loop.run(prompt)
 
+    _abort_reasons = {
+        "denied": "you denied the approval prompt",
+        "stall": "agent stalled (3× identical write call) — try rephrasing or use full_auto",
+        "bad_json": "model returned invalid tool-call JSON after 2 retries",
+        "provider": "LLM provider error after 3 retries — check API key / quota",
+        "max_tokens": "model output was truncated (max_tokens) — task split hint was injected",
+    }
+    log_path = get_session_log_path(workspace, session_id)
+    written_paths = _collect_written_paths(log_path)
+
     if result.hit_tool_call_limit:
         typer.echo(
             f"⚠  Tool call limit reached ({result.tool_calls_made}). Task may be incomplete.",
             err=True,
         )
     elif result.aborted_by_user:
-        typer.echo("⚠  Task aborted by user.", err=True)
+        reason_str = _abort_reasons.get(result.abort_reason, result.abort_reason)
+        typer.echo(f"⚠  Task halted: {reason_str}", err=True)
     else:
         typer.echo(result.final_text)
+
+    # Always print session summary so the user knows where files went and where to debug.
+    typer.echo("", err=True)
+    typer.echo("─── session summary ───────────────────", err=True)
+    typer.echo(f"workspace  : {workspace.root}", err=True)
+    typer.echo(f"tool calls : {result.tool_calls_made}", err=True)
+    if written_paths:
+        typer.echo("files written:", err=True)
+        for p in written_paths:
+            typer.echo(f"  {p}", err=True)
+    typer.echo(f"session log: {log_path}", err=True)
 
     logger.info(
         "session_end tool_calls=%d aborted=%s hit_limit=%s",

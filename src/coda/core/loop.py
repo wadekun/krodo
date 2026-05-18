@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Literal
 
 from coda.core.context import InMemoryContextManager
 from coda.core.events import SessionEventLogger
@@ -57,6 +58,9 @@ class LoopConfig:
     )
 
 
+AbortReason = Literal["denied", "stall", "bad_json", "provider", "max_tokens", "none"]
+
+
 @dataclass
 class TurnResult:
     """Outcome of a single agent turn."""
@@ -65,6 +69,7 @@ class TurnResult:
     tool_calls_made: int = 0
     aborted_by_user: bool = False
     hit_tool_call_limit: bool = False
+    abort_reason: AbortReason = field(default="none")
 
 
 class AgentLoop:
@@ -114,9 +119,11 @@ class AgentLoop:
         final_text = ""
         hit_limit = False
         aborted = False
+        abort_reason: AbortReason = "none"
 
-        # Track retry count for provider errors (per-turn)
+        # Retry counters — persisted across while iterations so exhaustion works.
         provider_retry = 0
+        bad_json_retry = 0
 
         while True:
             # ----------------------------------------------------------------
@@ -153,13 +160,38 @@ class AgentLoop:
                     continue
                 # ABORT
                 final_text = msg
+                abort_reason = "provider"
                 break
+
+            # ----------------------------------------------------------------
+            # Detect max_tokens truncation: tool-call args were cut off mid-JSON.
+            # Inject a recovery message asking the model to write a smaller file.
+            # ----------------------------------------------------------------
+            stop_reason = getattr(response, "stop_reason", None) or getattr(
+                response, "finish_reason", None
+            )
+            if stop_reason == "max_tokens" and response.tool_calls:
+                truncated_names = [tc.name for tc in response.tool_calls]
+                recovery_hint = (
+                    "Your previous response was cut off because it exceeded the output token limit "
+                    f"while generating arguments for: {', '.join(truncated_names)}. "
+                    "Please break the task into smaller pieces. "
+                    "For example, write the file in multiple smaller chunks, or split into "
+                    "separate files, to stay within the token limit."
+                )
+                self._logger.warning("max_tokens_truncation tool_calls=%s", truncated_names)
+                self._emit(
+                    SessionEventType.ERROR,
+                    error_kind="max_tokens",
+                    tool_names=truncated_names,
+                )
+                self.context_manager.add_user_input(recovery_hint)
+                continue
 
             # ----------------------------------------------------------------
             # Validate tool_call JSON
             # ----------------------------------------------------------------
             if response.tool_calls:
-                bad_json_retry = 0
                 for tc in response.tool_calls:
                     if "_raw" in (tc.arguments or {}):
                         raw_str = tc.arguments.get("_raw", "")
@@ -181,6 +213,7 @@ class AgentLoop:
                         # ABORT
                         final_text = recovery_msg
                         aborted = True
+                        abort_reason = "bad_json"
                         break
                 if aborted:
                     break
@@ -225,6 +258,7 @@ class AgentLoop:
                     )
                     final_text = msg
                     aborted = True
+                    abort_reason = "stall"
                     break
 
                 self._emit(
@@ -249,6 +283,7 @@ class AgentLoop:
 
                 if decision == "deny":
                     aborted = True
+                    abort_reason = "denied"
                     result = ToolResult(
                         tool_call_id=tc.id or "",
                         content="[user denied tool call]",
@@ -319,4 +354,5 @@ class AgentLoop:
             tool_calls_made=tool_calls_made,
             aborted_by_user=aborted,
             hit_tool_call_limit=hit_limit,
+            abort_reason=abort_reason,
         )

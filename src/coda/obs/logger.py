@@ -82,6 +82,17 @@ class _SecretRedactorFilter(logging.Filter):
 # ---------------------------------------------------------------------------
 
 
+_NOISY_LOGGERS = (
+    "LiteLLM",
+    "LiteLLM Proxy",
+    "LiteLLM Router",
+    "httpx",
+    "httpcore",
+    "openai",
+    "anthropic",
+)
+
+
 def configure_logging(workspace: Any, session_id: str) -> logging.Logger:
     """Configure structlog and return a standard ``logging.Logger`` for the session.
 
@@ -128,6 +139,24 @@ def configure_logging(workspace: Any, session_id: str) -> logging.Logger:
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
+
+    # Suppress verbose DEBUG output from LiteLLM and HTTP libraries.
+    # Set CODA_LOG_LEVEL=DEBUG in the environment to re-enable full traces.
+    import os  # noqa: PLC0415
+
+    debug_mode = os.environ.get("CODA_LOG_LEVEL", "").upper() == "DEBUG"
+    noisy_level = logging.DEBUG if debug_mode else logging.WARNING
+    try:
+        import litellm  # noqa: PLC0415
+
+        litellm.suppress_debug_info = True
+    except Exception:  # noqa: BLE001, S110
+        pass
+    for _name in _NOISY_LOGGERS:
+        _nl = logging.getLogger(_name)
+        _nl.setLevel(noisy_level)
+        if not debug_mode:
+            _nl.propagate = False
 
     logger = logging.getLogger(f"coda.session.{session_id}")
     logger.info(

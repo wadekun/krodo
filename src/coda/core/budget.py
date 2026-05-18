@@ -55,6 +55,16 @@ MODEL_CONTEXT_WINDOW: dict[str, int] = {
     # Qwen
     "qwen-long": 950_000,
     "qwen-plus": 126_000,
+    "qwen-max": 30_000,
+    "qwen3": 126_000,
+    "qwen2.5": 126_000,
+    # ZhipuAI / GLM
+    "glm-4.7": 126_000,
+    "glm-4.6": 126_000,
+    "glm-4-plus": 126_000,
+    "glm-4-air": 126_000,
+    "glm-4": 126_000,
+    "glm-3-turbo": 32_000,
     # Local (conservative defaults)
     "llama-3.1-8b": 126_000,
     "llama-3.1-70b": 126_000,
@@ -69,6 +79,8 @@ MODEL_CONTEXT_WINDOW: dict[str, int] = {
 _MODEL_RATIO: dict[str, float] = {
     "claude": 1.1,  # prefix match
     "gemini": 1.05,
+    "glm": 1.1,
+    "qwen": 1.05,
     "default": 1.0,
 }
 

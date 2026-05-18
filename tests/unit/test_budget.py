@@ -57,6 +57,21 @@ class TestGetContextWindow:
         # "claude-opus-4-5" is an entry in the table
         assert get_context_window("claude-opus-4-5") > 0
 
+    def test_glm_4_7(self) -> None:
+        assert get_context_window("glm-4.7") == 126_000
+
+    def test_glm_with_provider_prefix(self) -> None:
+        assert get_context_window("anthropic/glm-4.7") == 126_000
+
+    def test_glm_4_plus(self) -> None:
+        assert get_context_window("glm-4-plus") == 126_000
+
+    def test_qwen3(self) -> None:
+        assert get_context_window("qwen3") == 126_000
+
+    def test_qwen_max(self) -> None:
+        assert get_context_window("qwen-max") == 30_000
+
 
 # ---------------------------------------------------------------------------
 # _get_ratio
@@ -69,6 +84,12 @@ class TestGetRatio:
 
     def test_claude_ratio(self) -> None:
         assert _get_ratio("claude-3-5-sonnet-20241022") == 1.1
+
+    def test_glm_ratio(self) -> None:
+        assert _get_ratio("glm-4.7") == 1.1
+
+    def test_qwen_ratio(self) -> None:
+        assert _get_ratio("qwen3") == 1.05
 
     def test_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("CODA_TOKEN_RATIO", "1.25")
