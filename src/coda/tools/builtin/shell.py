@@ -3,6 +3,9 @@
 Security: the command is parsed with shlex and passed to SandboxRunner.run()
 as a list — never shell=True.  Blocklist and path-firewall checks happen inside
 SandboxRunner, so approval must be obtained before calling execute().
+
+M4: Run-before-write heuristic — if the command looks like it will modify the
+filesystem, a git stash checkpoint is created before execution.
 """
 
 from __future__ import annotations
@@ -12,7 +15,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from coda.core.types import ToolDef, ToolResult
+from coda.core.types import SessionEventType, ToolDef, ToolResult
+from coda.sandbox.checkpoint import shell_command_writes
 from coda.tools.protocols import ToolContext
 
 _DEFAULT_TIMEOUT = 60.0
@@ -68,6 +72,25 @@ class RunShellTool:
         cwd = self._resolve_cwd(params.cwd, ctx)
         if isinstance(cwd, str):  # error
             return ToolResult(tool_call_id="", content=cwd, is_error=True)
+
+        # Checkpoint before commands that look like they write to disk (§5.4)
+        if shell_command_writes(params.command):
+            # Fallback scope: entire workspace root (conservative but safe)
+            sha = await ctx.checkpoint.create([ctx.workspace.root])
+            if sha and ctx.event_logger is not None:
+                from coda.core.events import SessionEventLogger  # noqa: PLC0415
+
+                if isinstance(ctx.event_logger, SessionEventLogger):
+                    ctx.event_logger.emit(
+                        SessionEventType.CHECKPOINT,
+                        data={
+                            "sha": sha,
+                            "affected_paths": [str(ctx.workspace.root)],
+                            "tool": "run_shell",
+                            "scope": "approximate",
+                            "command": params.command,
+                        },
+                    )
 
         # Execute via sandbox
         returncode, stdout, stderr = await ctx.sandbox.run(argv, cwd=cwd, timeout=params.timeout)

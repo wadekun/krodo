@@ -48,12 +48,44 @@ class ApplyPatchTool:
 
     async def execute(self, args: dict[str, object], ctx: ToolContext) -> ToolResult:
         params = ApplyPatchParams.model_validate(args)
+        # Collect affected paths for checkpoint (best-effort; validated inside _apply)
+        affected = self._collect_affected_paths(params, ctx)
+        if affected:
+            sha = await ctx.checkpoint.create(affected)
+            if sha and ctx.event_logger is not None:
+                from coda.core.events import SessionEventLogger  # noqa: PLC0415
+                from coda.core.types import SessionEventType  # noqa: PLC0415
+
+                if isinstance(ctx.event_logger, SessionEventLogger):
+                    ctx.event_logger.emit(
+                        SessionEventType.CHECKPOINT,
+                        data={
+                            "sha": sha,
+                            "affected_paths": [str(p) for p in affected],
+                            "tool": "apply_patch",
+                        },
+                    )
         result_text = self._apply(params, ctx)
         return ToolResult(
             tool_call_id="",
             content=result_text,
             is_error=result_text.startswith("ERROR"),
         )
+
+    def _collect_affected_paths(self, params: ApplyPatchParams, ctx: ToolContext) -> list[Path]:
+        """Extract target paths from the patch before applying (best-effort)."""
+        try:
+            patch_set = unidiff.PatchSet(params.patch)
+        except Exception:  # noqa: BLE001
+            return []
+        root = ctx.workspace.root
+        paths: list[Path] = []
+        for patched_file in patch_set:
+            raw_path = _canonical_path(patched_file)
+            target = _resolve_patch_path(raw_path, root)
+            if not isinstance(target, str):
+                paths.append(target)
+        return paths
 
     def _apply(self, params: ApplyPatchParams, ctx: ToolContext) -> str:  # noqa: C901
         try:
