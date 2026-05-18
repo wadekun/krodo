@@ -40,6 +40,13 @@ def print_banner(workspace: Workspace, approval_mode: str = "auto_edit") -> None
     content.append(str(workspace.root), style="green")
     content.append(f"  [{workspace.source}]\n", style="dim")
 
+    content.append("git        ", style="bold cyan")
+    if workspace.git_root is not None:
+        content.append(str(workspace.git_root), style="green")
+    else:
+        content.append("none", style="dim")
+    content.append("\n")
+
     content.append("approval   ", style="bold cyan")
     content.append(approval_mode, style="yellow")
 

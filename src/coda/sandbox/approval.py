@@ -157,6 +157,9 @@ class TerminalApprovalManager:
 
         console.print(f"\nApproval requested: {' '.join(summary_parts)}")
 
+        # Show diff preview for write tools before the y/n prompt (§1.3)
+        self._maybe_render_diff(tool_call, console)
+
         loop = asyncio.get_event_loop()
         while True:
             choice = await loop.run_in_executor(
@@ -183,6 +186,41 @@ class TerminalApprovalManager:
             elif choice == "?":
                 console.print(_PROMPT_HELP)
             # invalid choice — re-prompt
+
+    @staticmethod
+    def _maybe_render_diff(tool_call: ToolCall, console: object) -> None:
+        """Render a diff preview for write-class tools before the y/n prompt."""
+        from rich.console import Console  # noqa: PLC0415
+
+        if not isinstance(console, Console):
+            return
+
+        name = tool_call.name
+        args = tool_call.arguments
+
+        if name == "write_file":
+            path = str(args.get("path", "<unknown>"))
+            content = str(args.get("content", ""))
+            from coda.cli.diff_preview import render_diff  # noqa: PLC0415
+
+            console.print(render_diff(None, content, path))
+
+        elif name == "edit_file":
+            path = str(args.get("path", "<unknown>"))
+            old_str = str(args.get("old_string", ""))
+            new_str = str(args.get("new_string", ""))
+            from coda.cli.diff_preview import render_diff  # noqa: PLC0415
+
+            console.print(render_diff(old_str, new_str, f"{path} (edit)"))
+
+        elif name == "apply_patch":
+            patch_text = str(args.get("patch", ""))
+            if patch_text:
+                from coda.cli.diff_preview import render_diff  # noqa: PLC0415
+
+                console.print(render_diff(None, patch_text, "(patch)"))
+
+        # run_shell, git_* tools: no diff rendered (not text-patch operations)
 
     async def _prompt_pattern(
         self, tool_call: ToolCall, loop: asyncio.AbstractEventLoop
