@@ -137,6 +137,77 @@ Events emitted by AgentLoop: `USER_MESSAGE`, `ASSISTANT_MESSAGE`, `TOOL_CALL`, `
 - `--summary-window N` — dialogue rounds to compress in one pass (default 2)
 - Startup banner now shows: model context window / compression strategy / max tool calls
 
+## M4: `.codaignore`, Git checkpoint, `coda undo`, diff preview
+
+### CodaIgnore (`src/coda/sandbox/ignore.py`)
+
+`CodaIgnore` merges 4 tiers of ignore rules (backed by `pathspec` gitignore semantics):
+
+| Tier | Source | Always active? |
+|------|--------|----------------|
+| 1 | Hard-coded defaults: `.env`, `*.pem`, `id_rsa`, `node_modules/`, `__pycache__/`, etc. | ✅ yes |
+| 2 | Project `.gitignore` | — |
+| 3 | `<workspace_root>/.codaignore` | — |
+| 4 | `~/.config/coda/codaignore` | — |
+
+**API**: `ignore.match(path) -> MatchResult`; `ignore.is_ignored(path) -> bool`.
+
+All read tools (`read_file`, `list_dir`, `glob`, `grep`) check `ctx.ignore.match()` before accessing the path.  On match, they return `PathIgnoredError: '<path>' is ignored (rule: '<pattern>' from <source>)` as `ToolResult(is_error=True)`.
+
+One `CodaIgnore` instance is constructed at session start and injected via `ToolContext.ignore`.
+
+### GitCheckpointManager (`src/coda/sandbox/checkpoint.py`)
+
+`GitCheckpointManager.create(affected_paths) -> str | None`:
+- Runs `git stash create` (does **not** push to stash stack; working tree untouched).
+- Returns the stash SHA on success, `None` on clean tree or non-git workspace.
+- Logs a warning and returns `None` on non-git workspaces (no crash).
+
+`GitCheckpointManager.restore(sha, paths)`:
+- Runs `git checkout <sha> -- <paths>` (only touches the listed paths).
+- Raises `CheckpointError` on non-git workspace or bad SHA.
+
+`shell_command_writes(cmd) -> bool`: heuristic that returns `True` if *cmd* likely modifies the filesystem (redirect `>`, `rm`, `mv`, `sed -i`, `tee`, `wget`, etc.).
+
+Write tools wire-up:
+- `write_file`, `edit_file` → `create([target_path])` before writing.
+- `apply_patch` → `create(all_affected_paths)` before applying.
+- `run_shell` → `create([workspace_root])` when `shell_command_writes()` returns `True`.
+
+Each checkpoint emits a `CHECKPOINT` `SessionEvent` via `ctx.event_logger`.
+
+### `coda undo` (`src/coda/cli/undo.py`)
+
+Typer subcommand registered in `main.py`:
+
+```bash
+coda undo [--root <workspace>] [--session <session_id>]
+```
+
+Behaviour:
+1. Find the session JSONL (`<workspace>/.coda/logs/<session_id>.jsonl`; defaults to most-recent).
+2. Find the latest `CHECKPOINT` event (by `seq`).
+3. Call `GitCheckpointManager.restore(sha, affected_paths)`.
+4. Emit `UNDO` `SessionEvent`.
+5. Non-git workspace or no CHECKPOINT → exit 1 with friendly error.
+6. If `affected_paths == [workspace_root]` (shell command scope) → prompt for confirmation.
+
+### Diff preview (`src/coda/cli/diff_preview.py`)
+
+`render_diff(old, new, path) -> rich.syntax.Syntax`: returns a Rich `Syntax` object showing a unified diff, truncated to 200 lines.
+
+`render_new_file(content, path) -> Syntax`: convenience wrapper for new files (`old=None`).
+
+`TerminalApprovalManager._maybe_render_diff()` renders diffs for `write_file`, `edit_file`, `apply_patch` before the `y/n` approval prompt in `auto_edit` mode.
+
+### Banner update (`src/coda/cli/banner.py`)
+
+Session banner now shows a `git: <root> | none` line reflecting `workspace.git_root`.
+
+### New dependency
+
+`pathspec>=0.12,<1` added to `pyproject.toml` (major version pinned per engineering rule 7).
+
 ## When you (the agent) modify this codebase
 
 - Always `read_file` before `edit_file` — never guess file contents.

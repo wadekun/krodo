@@ -24,7 +24,7 @@ For full design rationale, see [`docs/architecture.md`](docs/architecture.md).
 | 1 M1 | Walking skeleton (3 tools, CLI, agent loop) | ✅ done |
 | 1 M2 | Full tools (11 tools) + three approval modes + pattern trust | ✅ done |
 | 1 M3 | Context management (token budget + dual compression) + 7 recovery scenarios | ✅ done |
-| 1 M4 | `.codaignore` + git checkpoint + `coda undo` | — |
+| 1 M4 | `.codaignore` + git checkpoint + `coda undo` + diff preview | ✅ done |
 | 2 | tree-sitter symbol index, repo-map, Textual TUI, MCP client | — |
 | 3 | OS-level sandbox, evaluation harness, OpenTelemetry / Langfuse | — |
 | 4 | Production-grade: Rust hot paths, single-binary distribution, LiteLLM Proxy | — |
@@ -120,6 +120,66 @@ uv run coda --max-tool-calls 5 "..."
 # Set compression window (how many dialogue rounds to compress at once):
 uv run coda --summary-window 3 "..."
 ```
+
+## .codaignore & Git checkpoint (M4)
+
+M4 adds two safety nets: a 4-tier ignore system and automatic git checkpointing before every write.
+
+### .codaignore — 4-tier path filtering (§5.3)
+
+Every `read_file`, `list_dir`, `glob`, and `grep` call passes through `CodaIgnore` before touching the disk.  Rules are merged from four sources in increasing specificity order:
+
+| Tier | Source | Overridable? |
+|------|--------|-------------|
+| 1 | Hard-coded defaults (`.env`, `*.pem`, `id_rsa`, `node_modules/`, etc.) | ❌ always active |
+| 2 | Project `.gitignore` | — |
+| 3 | Project `.codaignore` (workspace root) | adds custom patterns |
+| 4 | User-level `~/.config/coda/codaignore` | personal overrides |
+
+When a path matches any rule, the tool returns:
+```
+PathIgnoredError: '<path>' is ignored (rule: '<pattern>' from <source>)
+```
+
+#### Example `.codaignore`
+
+```gitignore
+# Exclude internal data directories from agent reads
+data/raw/
+reports/*.csv
+
+# Exclude generated mock files
+tests/fixtures/generated/
+```
+
+### Git checkpoint (§5.4)
+
+Before every write (`write_file`, `edit_file`, `apply_patch`) and write-heuristic shell command, Coda creates a lightweight `git stash create` checkpoint:
+
+1. Collect affected paths.
+2. `checkpoint_sha = git stash create` — does **not** push to the stash stack; working tree is untouched.
+3. Emit a `CHECKPOINT` `SessionEvent` to `.coda/logs/<session>.jsonl`.
+4. Execute the write.
+
+On non-git workspaces, checkpointing degrades to a no-op (warning logged; writes proceed normally).
+
+### coda undo
+
+```bash
+# Undo the last checkpoint in the most recent session:
+coda undo [--root <workspace>]
+
+# Undo a specific session:
+coda undo --session <session_id> [--root <workspace>]
+```
+
+`coda undo` reads the session JSONL, finds the most recent `CHECKPOINT` event, and runs `git checkout <sha> -- <affected_paths>` to restore only those paths.  Other files are untouched.
+
+| Condition | Behaviour |
+|-----------|-----------|
+| Non-git workspace | Exit 1 with friendly error |
+| No CHECKPOINT found | Exit 1 with log path hint |
+| `affected_paths` = workspace root (shell command scope) | Prompts for confirmation before restoring |
 
 ## Local development
 
