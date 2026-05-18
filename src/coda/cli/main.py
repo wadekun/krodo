@@ -24,6 +24,7 @@ from pathlib import Path
 import typer
 
 from coda.cli.banner import print_banner
+from coda.cli.undo import register_undo_app
 from coda.core.budget import BudgetCalculator, get_context_window
 from coda.core.compression import make_compressor
 from coda.core.context import InMemoryContextManager
@@ -33,7 +34,9 @@ from coda.core.workspace import LocalWorkspaceResolver
 from coda.llm.litellm_provider import LiteLLMProvider
 from coda.obs.logger import configure_logging
 from coda.sandbox.approval import TerminalApprovalManager
+from coda.sandbox.checkpoint import GitCheckpointManager
 from coda.sandbox.firewall import LocalSandboxRunner
+from coda.sandbox.ignore import CodaIgnore
 from coda.tools.builtin.fs import EditFileTool, ReadFileTool, WriteFileTool
 from coda.tools.builtin.git import GitCommitTool, GitDiffTool, GitStatusTool
 from coda.tools.builtin.patch import ApplyPatchTool
@@ -46,15 +49,20 @@ app = typer.Typer(
     name="coda",
     help="Coda — local-first AI coding agent.",
     add_completion=False,
-    no_args_is_help=True,
+    no_args_is_help=False,
+    invoke_without_command=True,
 )
+
+# Register sub-commands (add_typer does not change the main callback behaviour)
+register_undo_app(app)
 
 _DEFAULT_MODEL = "anthropic/claude-3-5-sonnet-20241022"
 
 
-@app.command()
+@app.callback(invoke_without_command=True)
 def main(
-    prompt: str = typer.Argument(..., help="Task to perform"),
+    ctx: typer.Context,
+    prompt: str | None = typer.Argument(None, help="Task to perform"),
     root: Path | None = typer.Option(
         None,
         "--root",
@@ -108,6 +116,14 @@ def main(
     ),
 ) -> None:
     """Run Coda with the given PROMPT."""
+    # If a subcommand was invoked (e.g. coda undo), skip the main loop
+    if ctx.invoked_subcommand is not None:
+        return
+
+    if not prompt:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
+
     import asyncio
 
     asyncio.run(
@@ -221,11 +237,18 @@ async def _async_main(
     registry.register(GitDiffTool())
     registry.register(GitCommitTool())
 
+    # M4: CodaIgnore + GitCheckpointManager
+    ignore = CodaIgnore.from_workspace(workspace)
+    checkpoint_mgr = GitCheckpointManager(workspace, logger=logger)
+
     tool_ctx = ToolContext(
         workspace=workspace,
         sandbox=sandbox,
         session_id=session_id,
         logger=logger,
+        ignore=ignore,
+        checkpoint=checkpoint_mgr,
+        event_logger=event_logger,
     )
 
     loop_config = LoopConfig(max_tool_calls_per_turn=max_tool_calls)
