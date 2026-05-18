@@ -35,6 +35,7 @@ dependencies = [
     "httpx>=0.27,<1",
     "keyring>=25,<26",
     "litellm>=1.40,<2",
+    "pathspec>=0.12,<1",
     "prompt-toolkit>=3.0,<4",
     "pydantic>=2.7,<3",
     "pydantic-settings>=2.2,<3",
@@ -87,8 +88,12 @@ ignore = [
     "S101",   # tests 大量使用 assert
     "S105",   # tests 中可能出现"假"的 hardcoded password
     "S106",
+    "S107",
     "S108",   # /tmp paths in tests are intentional
+    "S603",   # subprocess calls in tests are intentional
+    "S607",   # partial executable paths in tests are intentional
     "T201",   # tests 偶尔需要 print 调试
+    "ASYNC221",  # blocking subprocess in async tests is fine
     "ASYNC240",  # Path methods in async tests are fine (not trio/anyio)
     "B017",   # broad exception assertions in tests are acceptable
 ]

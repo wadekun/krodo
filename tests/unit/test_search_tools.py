@@ -10,6 +10,7 @@ import pytest
 
 from coda.core.workspace import LocalWorkspaceResolver
 from coda.sandbox.firewall import LocalSandboxRunner
+from coda.sandbox.ignore import CodaIgnore
 from coda.tools.builtin.search import GlobTool, GrepTool, ListDirTool, _rg_available
 from coda.tools.protocols import ToolContext
 
@@ -22,6 +23,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
         sandbox=sb,
         session_id="test",
         logger=logging.getLogger("test"),
+        ignore=CodaIgnore(tmp_path),
     )
 
 
@@ -346,3 +348,52 @@ async def test_try_ripgrep_no_output_returns_no_matches(tmp_path: Path) -> None:
         )
     assert result is not None
     assert "no matches" in result
+
+
+# ---------------------------------------------------------------------------
+# CodaIgnore integration in search tools (M4 PR5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_dir_skips_ignored_paths(tmp_path: Path) -> None:
+    """list_dir should not return paths matched by CodaIgnore."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("code\n")
+    (tmp_path / ".env").write_text("SECRET=1\n")
+
+    ctx = _ctx(tmp_path)
+    result = await ListDirTool().execute({"path": ".", "depth": 2}, ctx)
+    assert not result.is_error
+    assert "main.py" in result.content
+    assert ".env" not in result.content
+
+
+@pytest.mark.asyncio
+async def test_glob_skips_ignored_paths(tmp_path: Path) -> None:
+    """glob should exclude .env files matched by hardcoded defaults."""
+    (tmp_path / "app.py").write_text("code\n")
+    (tmp_path / ".env").write_text("SECRET=1\n")
+    (tmp_path / ".env.local").write_text("SECRET=2\n")
+
+    ctx = _ctx(tmp_path)
+    result = await GlobTool().execute({"pattern": "*", "path": "."}, ctx)
+    assert not result.is_error
+    assert "app.py" in result.content
+    assert ".env" not in result.content
+
+
+@pytest.mark.asyncio
+async def test_grep_skips_ignored_files(tmp_path: Path) -> None:
+    """grep Python fallback should not search inside ignored files."""
+    (tmp_path / "code.py").write_text("SECRET=find_me\n")
+    (tmp_path / ".env").write_text("SECRET=find_me\n")
+
+    ctx = _ctx(tmp_path)
+    with patch("coda.tools.builtin.search._try_ripgrep", return_value=None):
+        result = await GrepTool().execute(
+            {"pattern": "find_me", "path": ".", "case_sensitive": True}, ctx
+        )
+    assert not result.is_error
+    assert "code.py" in result.content
+    assert ".env" not in result.content

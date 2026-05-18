@@ -76,7 +76,7 @@ class ListDirTool:
         if not base.is_dir():
             return f"ERROR: '{params.path}' is not a directory"
 
-        entries = self._collect(base, ctx.workspace.root, params.depth)
+        entries = self._collect(base, ctx.workspace.root, params.depth, ctx)
         if not entries:
             return f"(empty directory: {params.path})"
 
@@ -90,9 +90,9 @@ class ListDirTool:
             result += f"\n... [truncated — showing first {_MAX_RESULTS} of {len(entries)}]"
         return result
 
-    def _collect(self, base: Path, root: Path, depth: int) -> list[str]:
+    def _collect(self, base: Path, root: Path, depth: int, ctx: ToolContext) -> list[str]:
         results: list[str] = []
-        self._recurse(base, base, root, depth, 0, results)
+        self._recurse(base, base, root, depth, 0, results, ctx)
         return results
 
     def _recurse(
@@ -103,6 +103,7 @@ class ListDirTool:
         max_depth: int,
         current_depth: int,
         results: list[str],
+        ctx: ToolContext,
     ) -> None:
         if current_depth >= max_depth:
             return
@@ -123,10 +124,13 @@ class ListDirTool:
                 resolved.relative_to(root)
             except ValueError:
                 continue
+            # Skip ignored paths
+            if ctx.ignore.is_ignored(resolved):
+                continue
             rel = str(resolved.relative_to(root))
             results.append(rel)
             if child.is_dir() and not child.is_symlink():
-                self._recurse(child, base, root, max_depth, current_depth + 1, results)
+                self._recurse(child, base, root, max_depth, current_depth + 1, results, ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +185,7 @@ class GlobTool:
             return f"ERROR: glob failed: {exc}"
 
         allowed = filter_allowed_paths(raw_matches, ctx.workspace)
+        allowed = [p for p in allowed if not ctx.ignore.is_ignored(p)]
         if not allowed:
             return f"(no matches for '{params.pattern}' under '{params.path}')"
 
@@ -250,6 +255,7 @@ class GrepTool:
             ctx.workspace.root,
             case_sensitive=params.case_sensitive,
             include=params.include,
+            ctx=ctx,
         )
         return result
 
@@ -261,6 +267,7 @@ async def _run_ripgrep_or_fallback(
     *,
     case_sensitive: bool = True,
     include: str | None = None,
+    ctx: ToolContext | None = None,
 ) -> str:
     """Try ripgrep first; fall back to pure-Python re search."""
     rg_result = await _try_ripgrep(
@@ -269,7 +276,7 @@ async def _run_ripgrep_or_fallback(
     if rg_result is not None:
         return rg_result
     return _python_grep(
-        pattern, base, workspace_root, case_sensitive=case_sensitive, include=include
+        pattern, base, workspace_root, case_sensitive=case_sensitive, include=include, ctx=ctx
     )
 
 
@@ -326,6 +333,7 @@ def _python_grep(
     *,
     case_sensitive: bool,
     include: str | None,
+    ctx: ToolContext | None = None,
 ) -> str:
     """Pure-Python grep fallback using pathlib.rglob + re."""
     flags = 0 if case_sensitive else re.IGNORECASE
@@ -346,6 +354,9 @@ def _python_grep(
         except ValueError:
             continue
         if any(part in _NOISE_DIRS for part in rel.parts):
+            continue
+        # Skip paths ignored by CodaIgnore
+        if ctx is not None and ctx.ignore.is_ignored(path):
             continue
         # Only text files
         try:

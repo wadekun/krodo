@@ -8,7 +8,7 @@ state.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from coda.core.types import ToolDef, ToolResult
@@ -17,7 +17,43 @@ if TYPE_CHECKING:
     import logging
 
     from coda.core.workspace import Workspace
+    from coda.sandbox.checkpoint import GitCheckpointManager
+    from coda.sandbox.ignore import CodaIgnore
     from coda.sandbox.protocols import SandboxRunner
+
+
+def _default_ignore() -> CodaIgnore:
+    """Lazy import avoids circular dependency at module load time."""
+    # Fallback: ignore nothing (used when ToolContext is created without a real
+    # workspace, e.g. in older tests that haven't been updated yet).
+    import tempfile
+    from pathlib import Path
+
+    from coda.sandbox.ignore import CodaIgnore
+
+    tmp = Path(tempfile.mkdtemp())
+    return CodaIgnore(tmp)
+
+
+def _default_checkpoint() -> GitCheckpointManager:
+    """Return a no-op checkpoint manager for tests that don't wire one up."""
+    import tempfile
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    from coda.core.workspace import Workspace
+    from coda.sandbox.checkpoint import GitCheckpointManager
+
+    tmp = Path(tempfile.mkdtemp())
+    ws = Workspace(
+        root=tmp,
+        config_path=tmp / ".coda" / "config.yaml",
+        memory_paths=[],
+        git_root=None,
+        source="cwd",
+        discovered_at=datetime.now(tz=UTC),
+    )
+    return GitCheckpointManager(ws)
 
 
 @dataclass
@@ -28,6 +64,9 @@ class ToolContext:
     sandbox: SandboxRunner
     session_id: str
     logger: logging.Logger
+    ignore: CodaIgnore = field(default_factory=_default_ignore)
+    checkpoint: GitCheckpointManager = field(default_factory=_default_checkpoint)
+    event_logger: object | None = None  # SessionEventLogger injected by CLI
 
 
 @runtime_checkable

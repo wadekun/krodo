@@ -5,6 +5,9 @@ calls Path.cwd() or __file__ (§3.4.2 invariant 2).
 
 M3: edit_file caches the SHA-256 of the file at read-time and validates it
 before writing (recovery scenario 5 — concurrent modification conflict).
+
+M4: write_file and edit_file create a git stash checkpoint before writing
+and emit a CHECKPOINT SessionEvent via ctx.event_logger.
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from coda.core.types import ToolDef, ToolResult
+from coda.core.types import SessionEventType, ToolDef, ToolResult
 from coda.tools.protocols import ToolContext
 
 _READ_LIMIT_BYTES = 50_000
@@ -70,16 +73,22 @@ class ReadFileTool:
     async def execute(self, args: dict[str, object], ctx: ToolContext) -> ToolResult:
         params = ReadFileParams.model_validate(args)
         result_text = self._read(params, ctx)
+        is_error = result_text.startswith("ERROR") or result_text.startswith("PathIgnoredError")
         return ToolResult(
             tool_call_id="",
             content=result_text,
-            is_error=result_text.startswith("ERROR"),
+            is_error=is_error,
         )
 
     def _read(self, params: ReadFileParams, ctx: ToolContext) -> str:
         target = _resolve_path(params.path, ctx)
         if isinstance(target, str):
             return target  # error string
+
+        # Check CodaIgnore before reading (§5.3)
+        match = ctx.ignore.match(target)
+        if match.is_ignored:
+            return str(match.error())
 
         if not target.exists():
             return f"ERROR: file '{params.path}' does not exist"
@@ -135,18 +144,33 @@ class WriteFileTool:
 
     async def execute(self, args: dict[str, object], ctx: ToolContext) -> ToolResult:
         params = WriteFileParams.model_validate(args)
-        result_text = self._write(params, ctx)
+        target = _resolve_path(params.path, ctx)
+        if isinstance(target, str):
+            return ToolResult(tool_call_id="", content=target, is_error=True)
+
+        # Create checkpoint before writing (§5.4)
+        sha = await ctx.checkpoint.create([target])
+        if sha and ctx.event_logger is not None:
+            from coda.core.events import SessionEventLogger  # noqa: PLC0415
+
+            if isinstance(ctx.event_logger, SessionEventLogger):
+                ctx.event_logger.emit(
+                    SessionEventType.CHECKPOINT,
+                    data={
+                        "sha": sha,
+                        "affected_paths": [str(target)],
+                        "tool": "write_file",
+                    },
+                )
+
+        result_text = self._write(params, ctx, target)
         return ToolResult(
             tool_call_id="",
             content=result_text,
             is_error=result_text.startswith("ERROR"),
         )
 
-    def _write(self, params: WriteFileParams, ctx: ToolContext) -> str:
-        target = _resolve_path(params.path, ctx)
-        if isinstance(target, str):
-            return target
-
+    def _write(self, params: WriteFileParams, ctx: ToolContext, target: Path) -> str:
         old_text = ""
         if target.exists():
             try:
@@ -203,18 +227,33 @@ class EditFileTool:
 
     async def execute(self, args: dict[str, object], ctx: ToolContext) -> ToolResult:
         params = EditFileParams.model_validate(args)
-        result_text = self._edit(params, ctx)
+        target = _resolve_path(params.path, ctx)
+        if isinstance(target, str):
+            return ToolResult(tool_call_id="", content=target, is_error=True)
+
+        # Create checkpoint before editing (§5.4)
+        sha = await ctx.checkpoint.create([target])
+        if sha and ctx.event_logger is not None:
+            from coda.core.events import SessionEventLogger  # noqa: PLC0415
+
+            if isinstance(ctx.event_logger, SessionEventLogger):
+                ctx.event_logger.emit(
+                    SessionEventType.CHECKPOINT,
+                    data={
+                        "sha": sha,
+                        "affected_paths": [str(target)],
+                        "tool": "edit_file",
+                    },
+                )
+
+        result_text = self._edit(params, ctx, target)
         return ToolResult(
             tool_call_id="",
             content=result_text,
             is_error=result_text.startswith("ERROR"),
         )
 
-    def _edit(self, params: EditFileParams, ctx: ToolContext) -> str:
-        target = _resolve_path(params.path, ctx)
-        if isinstance(target, str):
-            return target
-
+    def _edit(self, params: EditFileParams, ctx: ToolContext, target: Path) -> str:
         if not target.exists():
             return f"ERROR: file '{params.path}' does not exist"
         if not target.is_file():

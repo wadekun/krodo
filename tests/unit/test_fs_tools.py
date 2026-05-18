@@ -9,6 +9,7 @@ import pytest
 
 from coda.core.workspace import LocalWorkspaceResolver
 from coda.sandbox.firewall import LocalSandboxRunner
+from coda.sandbox.ignore import CodaIgnore
 from coda.tools.builtin.fs import ReadFileTool, WriteFileTool
 from coda.tools.protocols import ToolContext
 
@@ -21,6 +22,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
         sandbox=sb,
         session_id="test",
         logger=logging.getLogger("test"),
+        ignore=CodaIgnore(tmp_path),
     )
 
 
@@ -94,6 +96,18 @@ async def test_read_file_not_a_file(tmp_path: Path) -> None:
     result = await ReadFileTool().execute({"path": "subdir"}, ctx)
     assert result.is_error
     assert "not a regular file" in result.content
+
+
+@pytest.mark.asyncio
+async def test_read_file_ignored_by_codaignore(tmp_path: Path) -> None:
+    """read_file on a .env file returns PathIgnoredError (hardcoded default)."""
+    (tmp_path / ".env").write_text("SECRET=abc\n")
+    ctx = _ctx(tmp_path)
+    result = await ReadFileTool().execute({"path": ".env"}, ctx)
+    assert result.is_error
+    assert "PathIgnoredError" in result.content
+    assert ".env" in result.content
+    assert "hardcoded" in result.content
 
 
 # ---------------------------------------------------------------------------
