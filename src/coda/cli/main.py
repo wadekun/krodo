@@ -312,6 +312,11 @@ async def _async_main(
         "bad_json": "model returned invalid tool-call JSON after 2 retries",
         "provider": "LLM provider error after 3 retries — check API key / quota",
         "max_tokens": "model output was truncated (max_tokens) — task split hint was injected",
+        "invalid_args": (
+            "tool calls had invalid arguments after 3 attempts "
+            "(likely LLM output truncation) — try a smaller task or a model with "
+            "higher max_output_tokens"
+        ),
     }
     log_path = get_session_log_path(workspace, session_id)
     written_paths = _collect_written_paths(log_path)

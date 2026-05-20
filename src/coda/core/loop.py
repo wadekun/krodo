@@ -64,7 +64,11 @@ class LoopConfig:
     )
 
 
-AbortReason = Literal["denied", "stall", "bad_json", "provider", "max_tokens", "none"]
+AbortReason = Literal[
+    "denied", "stall", "bad_json", "provider", "max_tokens", "invalid_args", "none"
+]
+
+_MAX_INVALID_ARGS_RETRIES = 3
 
 
 @dataclass
@@ -130,6 +134,7 @@ class AgentLoop:
         # Retry counters — persisted across while iterations so exhaustion works.
         provider_retry = 0
         bad_json_retry = 0
+        invalid_args_retry = 0
 
         while True:
             # ----------------------------------------------------------------
@@ -150,6 +155,12 @@ class AgentLoop:
                     tools=tool_defs,
                 )
                 provider_retry = 0  # reset on success
+                self._logger.info(
+                    "llm_response stop_reason=%r tool_calls=%d content_len=%d",
+                    response.stop_reason,
+                    len(response.tool_calls or []),
+                    len(response.content) if isinstance(response.content, str) else 0,
+                )
             except Exception as exc:  # noqa: BLE001
                 self._emit(SessionEventType.ERROR, error_kind=PROVIDER_ERROR, error=str(exc))
                 action, msg = await handle(
@@ -269,20 +280,36 @@ class AgentLoop:
                     try:
                         registered_tool.definition.parameters.model_validate(tc.arguments or {})
                     except ValidationError as exc:
+                        invalid_args_retry += 1
                         required = sorted(registered_tool.definition.parameters.model_fields)
-                        recovery_msg = (
-                            f"Your tool call '{tc.name}' had invalid or missing arguments: "
-                            f"{exc.errors()[0]['msg']}. "
-                            f"Required fields: {required}. "
-                            "Please retry the tool call with all required arguments filled in."
-                        )
                         self._logger.warning(
-                            "invalid_tool_args tool=%s error=%s", tc.name, exc.errors()[0]["msg"]
+                            "invalid_tool_args tool=%s attempt=%d/%d error=%s",
+                            tc.name,
+                            invalid_args_retry,
+                            _MAX_INVALID_ARGS_RETRIES,
+                            exc.errors()[0]["msg"],
                         )
                         self._emit(
                             SessionEventType.ERROR,
                             error_kind=INVALID_ARGS,
                             tool_name=tc.name,
+                            attempt=invalid_args_retry,
+                        )
+                        if invalid_args_retry >= _MAX_INVALID_ARGS_RETRIES:
+                            final_text = (
+                                f"Aborted: tool '{tc.name}' kept returning invalid arguments "
+                                f"after {_MAX_INVALID_ARGS_RETRIES} attempts. "
+                                "Likely cause: LLM output was truncated mid-call. "
+                                "Try a smaller task or a model with higher max_output_tokens."
+                            )
+                            aborted = True
+                            abort_reason = "invalid_args"
+                            break
+                        recovery_msg = (
+                            f"Your tool call '{tc.name}' had invalid or missing arguments: "
+                            f"{exc.errors()[0]['msg']}. "
+                            f"Required fields: {required}. "
+                            "Please retry the tool call with all required arguments filled in."
                         )
                         self.context_manager.add_user_input(recovery_msg)
                         had_invalid_args = True
@@ -391,7 +418,8 @@ class AgentLoop:
 
             # If any tool call had invalid args we injected a recovery message
             # and broke out of the for-loop; retry the LLM without aborting.
-            if had_invalid_args:
+            # But if we exhausted the budget (aborted=True), fall through to break.
+            if had_invalid_args and not aborted:
                 continue
 
             if hit_limit or aborted:

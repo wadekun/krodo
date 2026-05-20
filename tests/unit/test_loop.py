@@ -679,3 +679,71 @@ async def test_assistant_text_printed_with_tool_calls(
     assert reasoning in captured.out, (
         f"reasoning text not found in stdout; got: {captured.out!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# M4.7: invalid_args retry budget
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_invalid_args_retry_exhaustion(tmp_path: Path) -> None:
+    """After _MAX_INVALID_ARGS_RETRIES invalid-arg attempts the loop must abort
+    with abort_reason='invalid_args', not loop forever.
+    """
+    registry = ToolRegistry()
+    registry.register(EchoTool())  # EchoParams requires 'message: str'
+
+    # Every response has empty args — model never provides valid args
+    invalid_tc = ToolCall(id="tc-inv", name="echo", arguments={})
+    provider = _FakeLLMProvider(
+        [Message(role="assistant", content="", tool_calls=[invalid_tc])] * 10
+    )
+
+    result = await AgentLoop(
+        provider=provider,
+        registry=registry,
+        tool_ctx=_ctx(tmp_path),
+        approval=_AutoApprovalManager(),
+    ).run("do it")
+
+    assert result.aborted_by_user
+    assert result.abort_reason == "invalid_args"
+    # Exactly 3 LLM calls: original + 2 retries (3rd attempt triggers abort)
+    assert len(provider.calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_invalid_args_recovers_within_budget(tmp_path: Path) -> None:
+    """If the model fixes its args within the budget window the loop continues
+    normally and completes without aborting.
+    """
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+
+    invalid_tc = ToolCall(id="tc-inv", name="echo", arguments={})
+    valid_tc = ToolCall(id="tc-ok", name="echo", arguments={"message": "hello"})
+
+    responses = [
+        # attempt 1: invalid
+        Message(role="assistant", content="", tool_calls=[invalid_tc]),
+        # attempt 2: invalid
+        Message(role="assistant", content="", tool_calls=[invalid_tc]),
+        # attempt 3: valid args — within budget (budget is exhausted on the 3rd *failure*)
+        Message(role="assistant", content="", tool_calls=[valid_tc]),
+        # final text
+        Message(role="assistant", content="all done"),
+    ]
+    provider = _FakeLLMProvider(responses)
+
+    result = await AgentLoop(
+        provider=provider,
+        registry=registry,
+        tool_ctx=_ctx(tmp_path),
+        approval=_AutoApprovalManager(),
+    ).run("echo hello")
+
+    assert not result.aborted_by_user
+    assert result.abort_reason == "none"
+    assert result.final_text == "all done"
+    assert len(provider.calls) == 4
