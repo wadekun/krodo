@@ -30,6 +30,7 @@ class Message(BaseModel):
     content: str | list[dict[str, object]]
     tool_call_id: str | None = None
     tool_calls: list[ToolCall] | None = None
+    stop_reason: str | None = None
 
 
 class ToolResult(BaseModel):

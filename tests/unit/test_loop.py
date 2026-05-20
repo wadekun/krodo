@@ -560,3 +560,122 @@ async def test_abort_reason_bad_json_exhausted(tmp_path: Path) -> None:
 
     assert result.aborted_by_user
     assert result.abort_reason == "bad_json"
+
+
+# ---------------------------------------------------------------------------
+# M4.6: max_tokens detection, invalid-args validation, assistant text print
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_max_tokens_triggers_split_hint(tmp_path: Path) -> None:
+    """When LLM returns stop_reason='max_tokens' with tool_calls, the loop
+    must NOT show the approval prompt; instead it injects a split-task hint
+    and retries the LLM call.
+    """
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+
+    # First response: max_tokens truncation with empty-args tool call
+    truncated_tc = ToolCall(id="tc-trunc", name="echo", arguments={})
+    # Second response: clean answer after split hint
+    responses = [
+        Message(role="assistant", content="", tool_calls=[truncated_tc], stop_reason="max_tokens"),
+        Message(role="assistant", content="done after split"),
+    ]
+    provider = _FakeLLMProvider(responses)
+
+    approval_called: list[str] = []
+
+    class _TrackingApproval(_AutoApprovalManager):
+        async def check(self, tool_call: ToolCall) -> Any:
+            approval_called.append(tool_call.name)
+            return "approve"
+
+    result = await AgentLoop(
+        provider=provider,
+        registry=registry,
+        tool_ctx=_ctx(tmp_path),
+        approval=_TrackingApproval(),
+    ).run("write a big file")
+
+    # Approval must NOT have been called for the truncated response
+    assert not approval_called, f"approval was called unexpectedly for: {approval_called}"
+    # LLM must have been called twice (once for truncated, once after hint)
+    assert len(provider.calls) == 2
+    assert result.final_text == "done after split"
+
+
+@pytest.mark.asyncio
+async def test_invalid_tool_args_skips_approval(tmp_path: Path) -> None:
+    """When tool args fail Pydantic schema validation, the loop must NOT show
+    the approval prompt; instead it injects a recovery message and retries.
+    """
+    registry = ToolRegistry()
+    registry.register(EchoTool())  # EchoParams requires 'message: str'
+
+    # Tool call with empty/invalid args (missing required 'message')
+    invalid_tc = ToolCall(id="tc-inv", name="echo", arguments={})
+    # Second response: valid call after recovery message
+    valid_tc = ToolCall(id="tc-ok", name="echo", arguments={"message": "hello"})
+    responses = [
+        Message(role="assistant", content="", tool_calls=[invalid_tc]),
+        Message(role="assistant", content="", tool_calls=[valid_tc]),
+        Message(role="assistant", content="done"),
+    ]
+    provider = _FakeLLMProvider(responses)
+
+    approval_called: list[str] = []
+
+    class _TrackingApproval(_AutoApprovalManager):
+        async def check(self, tool_call: ToolCall) -> Any:
+            approval_called.append(tool_call.name)
+            return "approve"
+
+    result = await AgentLoop(
+        provider=provider,
+        registry=registry,
+        tool_ctx=_ctx(tmp_path),
+        approval=_TrackingApproval(),
+    ).run("echo hello")
+
+    # First call (invalid args) must NOT have triggered approval
+    # Second call (valid args) may trigger approval
+    assert "tc-inv" not in [c for c in approval_called], (
+        "approval was called for invalid-arg tool call"
+    )
+    # Recovery caused at least one extra LLM call
+    assert len(provider.calls) >= 2
+    assert result.final_text == "done"
+
+
+@pytest.mark.asyncio
+async def test_assistant_text_printed_with_tool_calls(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """When a response carries both content text and tool_calls, the text
+    must be printed to the console (dim style) before the tool is processed.
+    """
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+
+    reasoning = "I will now call the echo tool for you."
+    tool_call = ToolCall(id="tc-txt", name="echo", arguments={"message": "ping"})
+    responses = [
+        Message(role="assistant", content=reasoning, tool_calls=[tool_call]),
+        Message(role="assistant", content="done"),
+    ]
+    provider = _FakeLLMProvider(responses)
+
+    await AgentLoop(
+        provider=provider,
+        registry=registry,
+        tool_ctx=_ctx(tmp_path),
+        approval=_AutoApprovalManager(),
+    ).run("echo with reasoning")
+
+    captured = capsys.readouterr()
+    # The reasoning text must appear somewhere in stdout
+    assert reasoning in captured.out, (
+        f"reasoning text not found in stdout; got: {captured.out!r}"
+    )

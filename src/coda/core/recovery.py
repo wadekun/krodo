@@ -56,6 +56,7 @@ CONTEXT_LOSS = "context_loss"
 SHA256_CONFLICT = "sha256_conflict"
 PROVIDER_ERROR = "provider_error"
 EACCES = "eacces"
+INVALID_ARGS = "invalid_args"
 
 # ---------------------------------------------------------------------------
 # StallError

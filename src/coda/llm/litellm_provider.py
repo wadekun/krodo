@@ -50,8 +50,17 @@ def _message_to_litellm(msg: Message) -> dict[str, Any]:
     return out
 
 
-def _litellm_to_message(raw: Any) -> Message:
-    """Convert a LiteLLM response message to a Coda Message."""
+def _litellm_to_message(raw: Any, stop_reason: str | None = None) -> Message:
+    """Convert a LiteLLM response message to a Coda Message.
+
+    Parameters
+    ----------
+    raw:
+        The LiteLLM response message object (``response.choices[0].message``).
+    stop_reason:
+        The ``finish_reason`` from ``response.choices[0]``, forwarded verbatim
+        so that callers (e.g. AgentLoop) can branch on "max_tokens" etc.
+    """
     from typing import Literal, cast
 
     _raw_role = raw.role or "assistant"
@@ -72,7 +81,7 @@ def _litellm_to_message(raw: Any) -> Message:
                 args = {"_raw": tc.function.arguments}
             tool_calls.append(ToolCall(id=tc.id, name=tc.function.name, arguments=args))
 
-    return Message(role=_role, content=content, tool_calls=tool_calls)
+    return Message(role=_role, content=content, tool_calls=tool_calls, stop_reason=stop_reason)
 
 
 def _tooldef_to_litellm(td: ToolDef) -> dict[str, Any]:
@@ -141,7 +150,10 @@ class LiteLLMProvider:
         """Single-turn non-streaming call."""
         kwargs = self._build_kwargs(messages, tools)
         response = await litellm.acompletion(**kwargs, stream=False)
-        return _litellm_to_message(response.choices[0].message)
+        choice = response.choices[0]
+        raw_finish = getattr(choice, "finish_reason", None)
+        finish_reason: str | None = raw_finish if isinstance(raw_finish, str) else None
+        return _litellm_to_message(choice.message, stop_reason=finish_reason)
 
     def stream_chat(
         self,

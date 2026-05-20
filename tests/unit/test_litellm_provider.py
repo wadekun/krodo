@@ -317,3 +317,56 @@ def test_count_message_tokens_multiple_messages_larger_than_single() -> None:
         Message(role="assistant", content="Hi there, how can I help?"),
     ]
     assert provider.count_message_tokens(multi) > provider.count_message_tokens(single)
+
+
+# ---------------------------------------------------------------------------
+# stop_reason / finish_reason propagation — M4.6
+# ---------------------------------------------------------------------------
+
+
+def _make_acompletion_response_with_finish(content: str, finish_reason: str) -> Any:
+    response = MagicMock()
+    response.choices = [MagicMock()]
+    response.choices[0].message.role = "assistant"
+    response.choices[0].message.content = content
+    response.choices[0].message.tool_calls = None
+    response.choices[0].finish_reason = finish_reason
+    return response
+
+
+@pytest.mark.asyncio
+async def test_chat_preserves_finish_reason_max_tokens() -> None:
+    """finish_reason='max_tokens' must be forwarded as Message.stop_reason."""
+    provider = LiteLLMProvider(model="anthropic/claude-test")
+    mock_response = _make_acompletion_response_with_finish("partial", "max_tokens")
+
+    with patch(
+        "coda.llm.litellm_provider.litellm.acompletion",
+        new_callable=AsyncMock,
+        return_value=mock_response,
+    ):
+        result = await provider.chat(messages=[Message(role="user", content="hi")])
+
+    assert result.stop_reason == "max_tokens"
+
+
+@pytest.mark.asyncio
+async def test_chat_preserves_stop_reason_normal() -> None:
+    """finish_reason='stop' must be forwarded as Message.stop_reason."""
+    provider = LiteLLMProvider(model="anthropic/claude-test")
+    mock_response = _make_acompletion_response_with_finish("done", "stop")
+
+    with patch(
+        "coda.llm.litellm_provider.litellm.acompletion",
+        new_callable=AsyncMock,
+        return_value=mock_response,
+    ):
+        result = await provider.chat(messages=[Message(role="user", content="hi")])
+
+    assert result.stop_reason == "stop"
+
+
+def test_message_stop_reason_defaults_none() -> None:
+    """Message.stop_reason must default to None (backward compat)."""
+    msg = Message(role="user", content="x")
+    assert msg.stop_reason is None

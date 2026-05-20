@@ -19,11 +19,15 @@ import logging
 from dataclasses import dataclass, field
 from typing import Literal
 
+from pydantic import ValidationError
+from rich.console import Console
+
 from coda.core.context import InMemoryContextManager
 from coda.core.events import SessionEventLogger
 from coda.core.recovery import (
     BAD_JSON,
     EACCES,
+    INVALID_ARGS,
     PROVIDER_ERROR,
     STALL,
     TOOL_TIMEOUT,
@@ -43,6 +47,8 @@ from coda.llm.protocols import LLMProvider
 from coda.sandbox.protocols import ApprovalManager
 from coda.tools.protocols import ToolContext
 from coda.tools.registry import ToolRegistry
+
+_console = Console(stderr=False)
 
 _DEFAULT_MAX_TOOL_CALLS = 15
 _logger = logging.getLogger(__name__)
@@ -167,10 +173,7 @@ class AgentLoop:
             # Detect max_tokens truncation: tool-call args were cut off mid-JSON.
             # Inject a recovery message asking the model to write a smaller file.
             # ----------------------------------------------------------------
-            stop_reason = getattr(response, "stop_reason", None) or getattr(
-                response, "finish_reason", None
-            )
-            if stop_reason == "max_tokens" and response.tool_calls:
+            if response.stop_reason == "max_tokens" and response.tool_calls:
                 truncated_names = [tc.name for tc in response.tool_calls]
                 recovery_hint = (
                     "Your previous response was cut off because it exceeded the output token limit "
@@ -187,6 +190,18 @@ class AgentLoop:
                 )
                 self.context_manager.add_user_input(recovery_hint)
                 continue
+
+            # ----------------------------------------------------------------
+            # Print any reasoning/commentary text the model sent alongside
+            # its tool calls so users can see what the agent is thinking.
+            # (When there are no tool_calls the text goes via final_text path.)
+            # ----------------------------------------------------------------
+            if (
+                response.tool_calls
+                and isinstance(response.content, str)
+                and response.content.strip()
+            ):
+                _console.print(f"[dim]{response.content}[/dim]")
 
             # ----------------------------------------------------------------
             # Validate tool_call JSON
@@ -234,6 +249,7 @@ class AgentLoop:
                 tool_calls=[{"name": tc.name, "id": tc.id} for tc in (response.tool_calls or [])],
             )
 
+            had_invalid_args = False
             for tc in response.tool_calls:
                 if tool_calls_made >= self._config.max_tool_calls_per_turn:
                     hit_limit = True
@@ -242,6 +258,35 @@ class AgentLoop:
                         self._config.max_tool_calls_per_turn,
                     )
                     break
+
+                # ----------------------------------------------------------------
+                # Schema-validate tool args before showing the approval prompt.
+                # Empty or partial args (common when max_tokens truncates mid-call)
+                # are caught here and returned to the model for a clean retry.
+                # ----------------------------------------------------------------
+                registered_tool = self._registry.get(tc.name)
+                if registered_tool is not None:
+                    try:
+                        registered_tool.definition.parameters.model_validate(tc.arguments or {})
+                    except ValidationError as exc:
+                        required = sorted(registered_tool.definition.parameters.model_fields)
+                        recovery_msg = (
+                            f"Your tool call '{tc.name}' had invalid or missing arguments: "
+                            f"{exc.errors()[0]['msg']}. "
+                            f"Required fields: {required}. "
+                            "Please retry the tool call with all required arguments filled in."
+                        )
+                        self._logger.warning(
+                            "invalid_tool_args tool=%s error=%s", tc.name, exc.errors()[0]["msg"]
+                        )
+                        self._emit(
+                            SessionEventType.ERROR,
+                            error_kind=INVALID_ARGS,
+                            tool_name=tc.name,
+                        )
+                        self.context_manager.add_user_input(recovery_msg)
+                        had_invalid_args = True
+                        break  # skip remaining tcs; outer while will retry LLM
 
                 # Stall detection
                 try:
@@ -343,6 +388,11 @@ class AgentLoop:
 
                 if aborted:
                     break
+
+            # If any tool call had invalid args we injected a recovery message
+            # and broke out of the for-loop; retry the LLM without aborting.
+            if had_invalid_args:
+                continue
 
             if hit_limit or aborted:
                 break
