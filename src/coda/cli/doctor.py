@@ -58,18 +58,34 @@ def doctor(
         help="Custom LLM API base URL",
         envvar="CODA_API_BASE",
     ),
+    max_tokens: int = typer.Option(
+        16384,
+        "--max-tokens",
+        help="Configured max output tokens per response (displayed only).",
+        envvar="CODA_MAX_TOKENS",
+    ),
 ) -> None:
     """Run a pre-flight connectivity check against the LLM provider."""
-    asyncio.run(_async_doctor(model=model, api_key=api_key, api_base=api_base))
+    asyncio.run(
+        _async_doctor(
+            model=model,
+            api_key=api_key,
+            api_base=api_base,
+            max_tokens=max_tokens,
+        )
+    )
 
 
 async def _async_doctor(
     model: str,
     api_key: str | None,
     api_base: str | None,
+    max_tokens: int = 16384,
 ) -> None:
     from rich.console import Console  # noqa: PLC0415
     from rich.table import Table  # noqa: PLC0415
+
+    from coda.core.budget import get_context_window  # noqa: PLC0415
 
     console = Console()
     console.print("\n[bold cyan]coda doctor[/bold cyan] — LLM connectivity check\n")
@@ -86,6 +102,21 @@ async def _async_doctor(
     cfg.add_row("[bold]api_key[/bold]", key_display)
     console.print(cfg)
     console.print()
+
+    # ----------------------------------------------------------------
+    # Output budget — exposed because GLM-style models with too small a
+    # max_tokens will silently truncate write_file args to '{}'.
+    # ----------------------------------------------------------------
+    context_window = get_context_window(model)
+    budget = Table.grid(padding=(0, 2))
+    budget.add_row("[bold]max_tokens (output)[/bold]", f"{max_tokens:,}")
+    budget.add_row("[bold]context window[/bold]", f"{context_window:,} tokens (model default)")
+    console.print("[bold]output budget[/bold]")
+    console.print(budget)
+    console.print(
+        "[dim]Tip: if you see invalid_args aborts, raise --max-tokens "
+        "or lower the task scope.[/dim]\n"
+    )
 
     # ----------------------------------------------------------------
     # 1-token ping

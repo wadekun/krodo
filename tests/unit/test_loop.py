@@ -11,7 +11,7 @@ import pytest
 from pydantic import BaseModel
 
 from coda.core.context import InMemoryContextManager
-from coda.core.loop import AgentLoop, LoopConfig
+from coda.core.loop import AgentLoop, LoopConfig, render_system_prompt
 from coda.core.types import (
     Decision,
     LLMChunk,
@@ -747,3 +747,92 @@ async def test_invalid_args_recovers_within_budget(tmp_path: Path) -> None:
     assert result.abort_reason == "none"
     assert result.final_text == "all done"
     assert len(provider.calls) == 4
+
+
+# ---------------------------------------------------------------------------
+# M4.8: dynamic system-prompt rendering (tool list injected from registry)
+# ---------------------------------------------------------------------------
+
+
+def test_system_prompt_template_has_placeholder_and_rule5() -> None:
+    """The default LoopConfig.system_prompt must contain the {tool_list}
+    placeholder and the 4000-character rule that nudges incremental writes.
+    """
+    cfg = LoopConfig()
+    assert "{tool_list}" in cfg.system_prompt
+    assert "4000 characters" in cfg.system_prompt
+
+
+def test_agent_loop_renders_tool_list_into_prompt(tmp_path: Path) -> None:
+    """After AgentLoop is constructed, the system message stored in
+    context_manager must contain each registered tool's name.
+    """
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+
+    provider = _FakeLLMProvider([Message(role="assistant", content="x")])
+    loop = AgentLoop(
+        provider=provider,
+        registry=registry,
+        tool_ctx=_ctx(tmp_path),
+        approval=_AutoApprovalManager(),
+    )
+
+    # The system message is the first message in build_messages()
+    system_msg = loop.context_manager.build_messages()[0]
+    assert system_msg.role == "system"
+    assert "echo" in system_msg.content
+    # Placeholder must have been substituted
+    assert "{tool_list}" not in system_msg.content
+
+
+def test_agent_loop_handles_empty_registry(tmp_path: Path) -> None:
+    """Empty registry must produce a valid prompt that says 'no tools registered'
+    instead of crashing on .format() or producing an empty bullet list.
+    """
+    registry = ToolRegistry()  # zero tools
+    provider = _FakeLLMProvider([Message(role="assistant", content="x")])
+    loop = AgentLoop(
+        provider=provider,
+        registry=registry,
+        tool_ctx=_ctx(tmp_path),
+        approval=_AutoApprovalManager(),
+    )
+
+    system_msg = loop.context_manager.build_messages()[0]
+    assert "no tools registered" in system_msg.content
+
+
+def test_agent_loop_handles_plain_system_prompt(tmp_path: Path) -> None:
+    """Backwards compat: a LoopConfig(system_prompt='plain text, no placeholder')
+    must be used verbatim and not raise KeyError on .format().
+    """
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+
+    provider = _FakeLLMProvider([Message(role="assistant", content="x")])
+    loop = AgentLoop(
+        provider=provider,
+        registry=registry,
+        tool_ctx=_ctx(tmp_path),
+        approval=_AutoApprovalManager(),
+        config=LoopConfig(system_prompt="No placeholder here."),
+    )
+
+    system_msg = loop.context_manager.build_messages()[0]
+    assert system_msg.content == "No placeholder here."
+
+
+def test_render_system_prompt_helper_directly() -> None:
+    """The render_system_prompt() helper is module-public for reuse by main.py
+    and should handle the placeholder substitution outside an AgentLoop too.
+    """
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+
+    out = render_system_prompt("Tools:\n{tool_list}\nEnd.", registry)
+    assert "echo" in out
+    assert "{tool_list}" not in out
+
+    # Unchanged when no placeholder
+    assert render_system_prompt("plain", registry) == "plain"

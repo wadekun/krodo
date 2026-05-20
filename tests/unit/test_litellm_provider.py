@@ -370,3 +370,30 @@ def test_message_stop_reason_defaults_none() -> None:
     """Message.stop_reason must default to None (backward compat)."""
     msg = Message(role="user", content="x")
     assert msg.stop_reason is None
+
+
+# ---------------------------------------------------------------------------
+# extra_kwargs forwarding — M4.8 (max_tokens output budget)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_chat_forwards_max_tokens() -> None:
+    """LiteLLMProvider(extra_kwargs={'max_tokens': N}) must include N in every
+    chat() call so the model's output is not silently capped at provider default.
+    """
+    provider = LiteLLMProvider(
+        model="anthropic/claude-test",
+        extra_kwargs={"max_tokens": 8192},
+    )
+    mock_response = _make_acompletion_response_with_finish("ok", "stop")
+
+    with patch(
+        "coda.llm.litellm_provider.litellm.acompletion",
+        new_callable=AsyncMock,
+        return_value=mock_response,
+    ) as mock_call:
+        await provider.chat(messages=[Message(role="user", content="hi")])
+
+    call_kwargs = mock_call.call_args.kwargs
+    assert call_kwargs.get("max_tokens") == 8192

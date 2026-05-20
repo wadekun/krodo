@@ -236,3 +236,97 @@ def test_cli_read_only_denies_write(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     # File must NOT be modified
     assert (tmp_path / "existing.txt").read_text() == "original"
+
+
+# ---------------------------------------------------------------------------
+# M4.8: max_tokens flag wiring (CLI > env > default)
+# ---------------------------------------------------------------------------
+
+
+def _spy_provider(responses: list[Message]):  # type: ignore[no-untyped-def]
+    """Like _patch_provider but returns the MagicMock so call_args can be inspected."""
+    from unittest.mock import MagicMock  # noqa: PLC0415
+
+    spy = MagicMock(return_value=_FakeLLMProvider(responses))
+    return patch("coda.cli.main.LiteLLMProvider", spy), spy
+
+
+def test_cli_max_tokens_default_is_16384(tmp_path: Path) -> None:
+    """No --max-tokens, no CODA_MAX_TOKENS → provider gets max_tokens=16384."""
+    runner = CliRunner()
+    responses = [Message(role="assistant", content="done")]
+    patcher, spy = _spy_provider(responses)
+
+    with patcher:
+        result = runner.invoke(
+            app,
+            ["--root", str(tmp_path), "--approval", "full_auto", "go"],
+            env={"CODA_MAX_TOKENS": ""},  # clear env in case host has it set
+        )
+
+    assert result.exit_code == 0, result.output
+    spy.assert_called_once()
+    ck = spy.call_args.kwargs
+    assert ck.get("extra_kwargs") == {"max_tokens": 16384}
+
+
+def test_cli_max_tokens_env_override(tmp_path: Path) -> None:
+    """CODA_MAX_TOKENS=8192 → LiteLLMProvider gets extra_kwargs={'max_tokens': 8192}."""
+    runner = CliRunner()
+    responses = [Message(role="assistant", content="done")]
+    patcher, spy = _spy_provider(responses)
+
+    with patcher:
+        result = runner.invoke(
+            app,
+            ["--root", str(tmp_path), "--approval", "full_auto", "go"],
+            env={"CODA_MAX_TOKENS": "8192"},
+        )
+
+    assert result.exit_code == 0, result.output
+    ck = spy.call_args.kwargs
+    assert ck.get("extra_kwargs") == {"max_tokens": 8192}
+
+
+def test_cli_max_tokens_cli_overrides_env(tmp_path: Path) -> None:
+    """--max-tokens 4096 (with CODA_MAX_TOKENS=8192) → CLI wins, provider gets 4096."""
+    runner = CliRunner()
+    responses = [Message(role="assistant", content="done")]
+    patcher, spy = _spy_provider(responses)
+
+    with patcher:
+        result = runner.invoke(
+            app,
+            [
+                "--root", str(tmp_path),
+                "--approval", "full_auto",
+                "--max-tokens", "4096",
+                "go",
+            ],
+            env={"CODA_MAX_TOKENS": "8192"},
+        )
+
+    assert result.exit_code == 0, result.output
+    ck = spy.call_args.kwargs
+    assert ck.get("extra_kwargs") == {"max_tokens": 4096}
+
+
+def test_cli_banner_shows_max_output(tmp_path: Path) -> None:
+    """The compression banner line must include 'Max output:' and the configured value."""
+    runner = CliRunner()
+    responses = [Message(role="assistant", content="done")]
+
+    with _patch_provider(responses):
+        result = runner.invoke(
+            app,
+            [
+                "--root", str(tmp_path),
+                "--approval", "full_auto",
+                "--max-tokens", "12345",
+                "go",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Max output" in result.output
+    assert "12,345" in result.output

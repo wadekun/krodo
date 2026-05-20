@@ -108,6 +108,16 @@ def main(
         "--max-tool-calls",
         help="Maximum tool calls per turn before the loop aborts.",
     ),
+    max_tokens: int = typer.Option(
+        16384,
+        "--max-tokens",
+        help=(
+            "Maximum output tokens per LLM response. Raise this if responses "
+            "get truncated mid-tool-call (default 16384). Forwarded to the "
+            "LLM provider."
+        ),
+        envvar="CODA_MAX_TOKENS",
+    ),
     summary_window: int = typer.Option(
         2,
         "--summary-window",
@@ -137,6 +147,7 @@ def main(
             api_base=api_base,
             approval_mode=approval,
             max_tool_calls=max_tool_calls,
+            max_tokens=max_tokens,
             summary_window=summary_window,
         )
     )
@@ -183,6 +194,7 @@ async def _async_main(
     api_base: str | None,
     approval_mode: str,
     max_tool_calls: int = 15,
+    max_tokens: int = 16384,
     summary_window: int = 2,
 ) -> None:
     session_id = str(uuid.uuid4())[:8]
@@ -222,16 +234,18 @@ async def _async_main(
     _Console(stderr=True).print(
         f"[dim]Model context window: {context_window:,} tokens | "
         f"Compression: {compress_strategy} | "
-        f"Max tool calls: {max_tool_calls}[/dim]"
+        f"Max tool calls: {max_tool_calls} | "
+        f"Max output: {max_tokens:,} tokens[/dim]"
     )
 
     logger.info(
-        "session_init session_id=%s model=%s approval=%s compress=%s window=%d",
+        "session_init session_id=%s model=%s approval=%s compress=%s window=%d max_tokens=%d",
         session_id,
         model,
         approval_mode,
         compress_strategy,
         context_window,
+        max_tokens,
     )
 
     # 5. Wire up dependencies
@@ -242,6 +256,7 @@ async def _async_main(
         model=model,
         api_key=api_key,
         api_base=api_base,
+        extra_kwargs={"max_tokens": max_tokens},
     )
 
     # M3: Budget calculator + compressor
@@ -296,9 +311,12 @@ async def _async_main(
         event_logger=event_logger,
     )
 
-    # Inject budget + compressor into context manager
+    # Inject budget + compressor into context manager.
+    # Reuse the AgentLoop's already-rendered system prompt (which has the
+    # current tool list substituted in) so we don't lose the dynamic
+    # {tool_list} substitution by passing the raw template.
     loop.context_manager = InMemoryContextManager(
-        system_prompt=loop_config.system_prompt,
+        system_prompt=loop.system_prompt,
         budget=budget,
         compressor=compressor,
     )
