@@ -38,3 +38,6 @@ coverage.xml
 .coda/cache/
 .coda/sessions/
 .coda/logs/
+
+# Cursor state
+.cursor/

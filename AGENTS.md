@@ -208,6 +208,54 @@ Session banner now shows a `git: <root> | none` line reflecting `workspace.git_r
 
 `pathspec>=0.12,<1` added to `pyproject.toml` (major version pinned per engineering rule 7).
 
+## M4.9: Interactive REPL (multi-turn dialogue)
+
+The CLI now has two entry shapes — both share the *same* `AgentLoop`
+instance, so history persists naturally:
+
+```bash
+coda "one-shot task"     # headless: run once and exit (unchanged)
+coda                     # REPL: read → run → repeat
+```
+
+### Implementation map
+
+- `src/coda/cli/main.py`
+  - `_build_session_components(...)` → returns a `SessionComponents`
+    bundle (workspace + AgentLoop + logger + session_id + event_logger
+    + log_path + max_tokens).
+  - `_run_headless(prompt, components)` → one `loop.run` + headless
+    summary (preserves pre-M4.9 behaviour byte-for-byte).
+  - `ABORT_REASONS` / `_echo_turn_result` / `_collect_written_paths`
+    are module-level so the REPL can reuse them.
+- `src/coda/cli/repl.py`
+  - `run_repl(components)` — the multi-turn loop.
+  - `input()` runs in `asyncio.to_thread` so it doesn't block the event loop.
+  - Exit tokens: `exit` / `quit` / `:q` / `\q`; Ctrl-D (EOFError) exits
+    immediately; Ctrl-C at an empty prompt requires a second press
+    (`last_ctrl_c` sentinel, mirrors Python/IPython UX).
+  - Ctrl-C *during* a turn cancels just that turn (does **not** exit REPL).
+  - Empty / whitespace-only input is silently skipped.
+  - Session summary is printed exactly once at exit (`print_session_summary`
+    in `main.py`); per-turn output is just the model answer or abort message.
+
+### What carries across REPL turns
+
+| State | Lifetime |
+|---|---|
+| `session_id` / `SessionEventLogger` / JSONL log path | whole REPL session |
+| `GitCheckpointManager` | whole REPL session (checkpoints accumulate) |
+| `AgentLoop.context_manager` (conversation history) | whole REPL session |
+| `StallDetector` / `tool_calls_made` / `invalid_args_retry` | per turn (reset by `loop.run`) |
+| Banner / `full_auto` warning | printed once at session start |
+
+### What's deliberately deferred to M6
+
+- `prompt_toolkit` upgrade (arrow-key history, multi-line, syntax highlighting)
+- Slash commands (`:undo`, `:tokens`, `:clear`, `/compact`)
+- Cancelling in-flight LLM streaming on single Ctrl-C (requires provider-level
+  cancellation)
+
 ## When you (the agent) modify this codebase
 
 - Always `read_file` before `edit_file` — never guess file contents.

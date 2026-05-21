@@ -2,7 +2,8 @@
 
 Usage::
 
-    coda [OPTIONS] PROMPT
+    coda                            # interactive REPL (M4.9)
+    coda [OPTIONS] PROMPT           # one-shot headless mode
     coda --root /path/to/project "add docstrings to src/main.py"
 
 Environment variables:
@@ -14,12 +15,16 @@ Environment variables:
     CODA_COMPRESS       compression strategy: llm (default) | algorithmic
     CODA_TOKEN_RATIO    token ratio multiplier for non-GPT models (default 1.0,
                         Claude 1.1×)
+    CODA_MAX_TOKENS     max output tokens per LLM response (default 16384)
 """
 
 from __future__ import annotations
 
+import json as _json
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 
@@ -31,7 +36,7 @@ from coda.core.compression import make_compressor
 from coda.core.context import InMemoryContextManager
 from coda.core.events import SessionEventLogger
 from coda.core.loop import AgentLoop, LoopConfig
-from coda.core.workspace import LocalWorkspaceResolver
+from coda.core.workspace import LocalWorkspaceResolver, Workspace
 from coda.llm.litellm_provider import LiteLLMProvider
 from coda.obs.logger import configure_logging, get_session_log_path
 from coda.sandbox.approval import TerminalApprovalManager
@@ -45,6 +50,11 @@ from coda.tools.builtin.search import GlobTool, GrepTool, ListDirTool
 from coda.tools.builtin.shell import RunShellTool
 from coda.tools.protocols import ToolContext
 from coda.tools.registry import ToolRegistry
+
+if TYPE_CHECKING:
+    import logging
+
+    from coda.core.loop import TurnResult
 
 app = typer.Typer(
     name="coda",
@@ -61,10 +71,107 @@ register_doctor_app(app)
 _DEFAULT_MODEL = "anthropic/claude-3-5-sonnet-20241022"
 
 
+# ---------------------------------------------------------------------------
+# Module-level helpers (shared between headless and REPL modes)
+# ---------------------------------------------------------------------------
+
+
+# User-facing one-liner explanations of every AbortReason emitted by AgentLoop.
+# Shared so both headless and REPL render identical messages.
+ABORT_REASONS: dict[str, str] = {
+    "denied": "you denied the approval prompt",
+    "stall": "agent stalled (3× identical write call) — try rephrasing or use full_auto",
+    "bad_json": "model returned invalid tool-call JSON after 2 retries",
+    "provider": "LLM provider error after 3 retries — check API key / quota",
+    "max_tokens": "model output was truncated (max_tokens) — task split hint was injected",
+    "invalid_args": (
+        "tool calls had invalid arguments after 3 attempts "
+        "(likely LLM output truncation) — try a smaller task or a model with "
+        "higher max_output_tokens"
+    ),
+}
+
+
+@dataclass
+class SessionComponents:
+    """Bundle of long-lived objects shared across one Coda session.
+
+    Reused by both headless single-shot runs and the REPL multi-turn loop
+    so that the AgentLoop's context_manager (and therefore conversation
+    history) survives across turns.
+    """
+
+    workspace: Workspace
+    loop: AgentLoop
+    logger: logging.Logger
+    session_id: str
+    event_logger: SessionEventLogger
+    log_path: Path
+    max_tokens: int
+
+
+def _collect_written_paths(log_path: Path) -> list[str]:
+    """Return deduplicated file paths from CHECKPOINT events in the session log.
+
+    Reads the JSONL log; returns an empty list if the log is missing or
+    unparseable.
+    """
+    paths: list[str] = []
+    seen: set[str] = set()
+    try:
+        if not log_path.exists():
+            return paths
+        for raw in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            stripped = raw.strip()
+            if not stripped:
+                continue
+            try:
+                obj = _json.loads(stripped)
+            except _json.JSONDecodeError:
+                continue
+            if obj.get("type") == "checkpoint":
+                for p in obj.get("data", {}).get("affected_paths", []):
+                    if p not in seen:
+                        seen.add(p)
+                        paths.append(p)
+    except OSError:
+        pass
+    return paths
+
+
+def print_session_summary(components: SessionComponents, turns: int | None = None) -> None:
+    """Print the standard '─── session summary ───' block to stderr.
+
+    Shared between headless mode (called once after the single run) and REPL
+    mode (called once when the user exits). Pass `turns` to also display the
+    cumulative turn count (REPL only); headless mode omits it.
+    """
+    written_paths = _collect_written_paths(components.log_path)
+    typer.echo("", err=True)
+    typer.echo("─── session summary ───────────────────", err=True)
+    typer.echo(f"workspace  : {components.workspace.root}", err=True)
+    if turns is not None:
+        typer.echo(f"turns      : {turns}", err=True)
+    # tool_calls cannot be aggregated from TurnResult here (REPL has many turns);
+    # the JSONL log is the source of truth for per-session totals.  Headless
+    # mode passes its result.tool_calls_made through this helper via `turns=None`
+    # and prints its own line below for backward compat.
+    if written_paths:
+        typer.echo("files written:", err=True)
+        for p in written_paths:
+            typer.echo(f"  {p}", err=True)
+    typer.echo(f"session log: {components.log_path}", err=True)
+
+
+# ---------------------------------------------------------------------------
+# CLI callback
+# ---------------------------------------------------------------------------
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
-    prompt: str | None = typer.Argument(None, help="Task to perform"),
+    prompt: str | None = typer.Argument(None, help="Task to perform (omit to enter REPL)"),
     root: Path | None = typer.Option(
         None,
         "--root",
@@ -127,20 +234,15 @@ def main(
         ),
     ),
 ) -> None:
-    """Run Coda with the given PROMPT."""
+    """Run Coda with the given PROMPT, or enter REPL mode if no PROMPT is given."""
     # If a subcommand was invoked (e.g. coda undo), skip the main loop
     if ctx.invoked_subcommand is not None:
         return
 
-    if not prompt:
-        typer.echo(ctx.get_help())
-        raise typer.Exit()
+    import asyncio  # noqa: PLC0415
 
-    import asyncio
-
-    asyncio.run(
-        _async_main(
-            prompt=prompt,
+    async def _entry() -> None:
+        components = _build_session_components(
             root=root,
             model=model,
             api_key=api_key,
@@ -150,44 +252,24 @@ def main(
             max_tokens=max_tokens,
             summary_window=summary_window,
         )
-    )
+        if prompt:
+            await _run_headless(prompt, components)
+        else:
+            # Import lazily to avoid cycles and keep startup fast.
+            from coda.cli.repl import run_repl  # noqa: PLC0415
+
+            await run_repl(components)
+
+    asyncio.run(_entry())
 
 
-def _collect_written_paths(log_path: object) -> list[str]:
-    """Return deduplicated file paths from CHECKPOINT events in the session log.
-
-    Reads the JSONL log after the session ends.  Returns an empty list if the
-    log is missing or unparseable.
-    """
-    import json as _json  # noqa: PLC0415
-    from pathlib import Path as _Path  # noqa: PLC0415
-
-    paths: list[str] = []
-    seen: set[str] = set()
-    try:
-        lp = _Path(str(log_path))
-        if not lp.exists():
-            return paths
-        for raw in lp.read_text(encoding="utf-8", errors="replace").splitlines():
-            raw = raw.strip()
-            if not raw:
-                continue
-            try:
-                obj = _json.loads(raw)
-            except _json.JSONDecodeError:
-                continue
-            if obj.get("type") == "checkpoint":
-                for p in obj.get("data", {}).get("affected_paths", []):
-                    if p not in seen:
-                        seen.add(p)
-                        paths.append(p)
-    except OSError:
-        pass
-    return paths
+# ---------------------------------------------------------------------------
+# Session bootstrap (formerly inlined inside _async_main)
+# ---------------------------------------------------------------------------
 
 
-async def _async_main(
-    prompt: str,
+def _build_session_components(
+    *,
     root: Path | None,
     model: str,
     api_key: str | None,
@@ -195,8 +277,15 @@ async def _async_main(
     approval_mode: str,
     max_tool_calls: int = 15,
     max_tokens: int = 16384,
-    summary_window: int = 2,
-) -> None:
+    summary_window: int = 2,  # noqa: ARG001  (reserved for M5 compactor wiring)
+) -> SessionComponents:
+    """Wire workspace, logger, banner, provider, tools, and AgentLoop.
+
+    Returns a `SessionComponents` bundle ready to be driven by either
+    `_run_headless` (single turn) or `run_repl` (multi-turn).
+    Banner is printed exactly once here — REPL mode reuses these
+    components, so the banner naturally appears only on session start.
+    """
     session_id = str(uuid.uuid4())[:8]
 
     # 1. Resolve workspace
@@ -211,8 +300,8 @@ async def _async_main(
 
     # 4. full_auto warning banner
     if approval_mode == "full_auto":
-        from rich.console import Console
-        from rich.panel import Panel
+        from rich.console import Console  # noqa: PLC0415
+        from rich.panel import Panel  # noqa: PLC0415
 
         Console().print(
             Panel(
@@ -225,11 +314,11 @@ async def _async_main(
         )
 
     # 4b. Compression strategy banner
-    import os
+    import os  # noqa: PLC0415
 
     compress_strategy = os.environ.get("CODA_COMPRESS", "llm")
     context_window = get_context_window(model)
-    from rich.console import Console as _Console
+    from rich.console import Console as _Console  # noqa: PLC0415
 
     _Console(stderr=True).print(
         f"[dim]Model context window: {context_window:,} tokens | "
@@ -321,49 +410,68 @@ async def _async_main(
         compressor=compressor,
     )
 
-    # 6. Run
-    result = await loop.run(prompt)
+    log_path = Path(str(get_session_log_path(workspace, session_id)))
 
-    _abort_reasons = {
-        "denied": "you denied the approval prompt",
-        "stall": "agent stalled (3× identical write call) — try rephrasing or use full_auto",
-        "bad_json": "model returned invalid tool-call JSON after 2 retries",
-        "provider": "LLM provider error after 3 retries — check API key / quota",
-        "max_tokens": "model output was truncated (max_tokens) — task split hint was injected",
-        "invalid_args": (
-            "tool calls had invalid arguments after 3 attempts "
-            "(likely LLM output truncation) — try a smaller task or a model with "
-            "higher max_output_tokens"
-        ),
-    }
-    log_path = get_session_log_path(workspace, session_id)
-    written_paths = _collect_written_paths(log_path)
+    return SessionComponents(
+        workspace=workspace,
+        loop=loop,
+        logger=logger,
+        session_id=session_id,
+        event_logger=event_logger,
+        log_path=log_path,
+        max_tokens=max_tokens,
+    )
 
+
+# ---------------------------------------------------------------------------
+# Headless one-shot mode
+# ---------------------------------------------------------------------------
+
+
+async def _run_headless(prompt: str, components: SessionComponents) -> None:
+    """Run a single AgentLoop turn and print the standard session summary.
+
+    Used by `coda PROMPT` invocations.  Behaviour is unchanged from the
+    pre-M4.9 implementation: print result, then summary, then exit.
+    """
+    result = await components.loop.run(prompt)
+    _echo_turn_result(result)
+    _print_headless_summary(components, result)
+    components.logger.info(
+        "session_end tool_calls=%d aborted=%s hit_limit=%s",
+        result.tool_calls_made,
+        result.aborted_by_user,
+        result.hit_tool_call_limit,
+    )
+
+
+def _echo_turn_result(result: TurnResult) -> None:
+    """Print one turn's outcome (final text, abort reason, or limit warning).
+
+    Shared between headless mode and REPL turns so users see identical
+    diagnostics regardless of entry point.
+    """
     if result.hit_tool_call_limit:
         typer.echo(
             f"⚠  Tool call limit reached ({result.tool_calls_made}). Task may be incomplete.",
             err=True,
         )
     elif result.aborted_by_user:
-        reason_str = _abort_reasons.get(result.abort_reason, result.abort_reason)
+        reason_str = ABORT_REASONS.get(result.abort_reason, result.abort_reason)
         typer.echo(f"⚠  Task halted: {reason_str}", err=True)
     else:
         typer.echo(result.final_text)
 
-    # Always print session summary so the user knows where files went and where to debug.
+
+def _print_headless_summary(components: SessionComponents, result: TurnResult) -> None:
+    """Headless-mode summary preserves the original layout (tool calls line)."""
+    written_paths = _collect_written_paths(components.log_path)
     typer.echo("", err=True)
     typer.echo("─── session summary ───────────────────", err=True)
-    typer.echo(f"workspace  : {workspace.root}", err=True)
+    typer.echo(f"workspace  : {components.workspace.root}", err=True)
     typer.echo(f"tool calls : {result.tool_calls_made}", err=True)
     if written_paths:
         typer.echo("files written:", err=True)
         for p in written_paths:
             typer.echo(f"  {p}", err=True)
-    typer.echo(f"session log: {log_path}", err=True)
-
-    logger.info(
-        "session_end tool_calls=%d aborted=%s hit_limit=%s",
-        result.tool_calls_made,
-        result.aborted_by_user,
-        result.hit_tool_call_limit,
-    )
+    typer.echo(f"session log: {components.log_path}", err=True)

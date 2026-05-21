@@ -41,8 +41,22 @@ uv sync
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY / CODA_API_KEY
 
 mkdir -p /tmp/coda-sandbox
+
+# Headless: run one task and exit
 uv run coda --root /tmp/coda-sandbox "create hello.py that prints Hello Coda, then run it"
+
+# REPL (M4.9): omit the prompt to enter interactive multi-turn mode
+uv run coda --root /tmp/coda-sandbox
+# you> create a simple mario game
+# (assistant works, then…)
+# you> now add a sound effect when collecting coins
+# you> exit          # or Ctrl-D / Ctrl-C twice
 ```
+
+In REPL mode the conversation history (including everything the agent did
+in the previous turn) is carried over, so follow-ups like "now add X" or
+"fix the bug from before" work naturally.  Exit with `exit` / `quit` /
+`:q`, Ctrl-D, or two consecutive Ctrl-C presses at the prompt.
 
 ### Stable release (v0.1 — not yet published)
 
