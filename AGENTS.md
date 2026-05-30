@@ -4,7 +4,7 @@
 
 ## What this project is
 
-Coda is a local-first, multi-provider coding agent CLI. We are currently in **Phase 1 (MVP)**: building a usable REPL + headless `coda exec` with 11 tools, three approval modes, automatic git checkpoints, and SQLite-backed sessions. We are explicitly **not** building TUI / RAG / Docker sandbox / IDE plugins / Web UI in this phase.
+Coda is a local-first, multi-provider coding agent CLI. We are currently in **Phase 1 (MVP)**: building a usable REPL + headless `coda exec` with 11 tools, three approval modes, automatic git checkpoints, JSONL-backed sessions, and AGENTS.md project memory. We are explicitly **not** building TUI / RAG / Docker sandbox / IDE plugins / Web UI in this phase.
 
 The single source of truth for design decisions is [`docs/architecture.md`](docs/architecture.md). When in doubt, read it first; if the design is unclear or wrong, update the doc in the same PR as the code.
 
@@ -76,7 +76,7 @@ M2 extended the 3 M1 tools to a full set of 11:
 - `read_only` — only read/search/status tools; write/shell always denied.
 - `auto_edit` (default) — reads auto-approved; writes prompt `[y/n/a/p/?]`.
   - `p` enters a pattern rule: `<tool_name> <glob>` (e.g. `run_shell pytest*`).
-  - Pattern rules stored in memory; persisted to SQLite in M5.
+  - Pattern rules stored in memory; persisted via `JsonlSessionStore` in M5.
 - `full_auto` — all tools auto-approved; red warning banner printed at startup.
 
 ## M3: Token budget, dual compression, and error recovery (Phase 1 M3)
@@ -126,8 +126,9 @@ M3 brings context-window safety and centralised error recovery to the agent loop
 - Typed `emit(SessionEventType, data)` → `SessionEvent`
 - `emit_from(event)` — for compressor-generated events (overwrites session_id + seq)
 - Monotonically-increasing `seq` counter
-- JSONL path: `<workspace>/.coda/logs/<session_id>.jsonl`
-- Factory: `SessionEventLogger.from_workspace_path(session_id, workspace_root)`
+- Session events: `<workspace>/.coda/sessions/<session_id>.jsonl`
+- App logs: `<workspace>/.coda/logs/<session_id>.log`
+- Factory: `SessionEventLogger.from_store(session_id, store)` (preferred) or `from_workspace_path` (legacy)
 
 Events emitted by AgentLoop: `USER_MESSAGE`, `ASSISTANT_MESSAGE`, `TOOL_CALL`, `APPROVAL_DECISION`, `TOOL_RESULT`, `COMPRESSION`, `ERROR`.
 
@@ -255,6 +256,67 @@ coda                     # REPL: read → run → repeat
 - Slash commands (`:undo`, `:tokens`, `:clear`, `/compact`)
 - Cancelling in-flight LLM streaming on single Ctrl-C (requires provider-level
   cancellation)
+
+## M5: Persistence + memory (JSONL sessions, `coda resume`, AGENTS.md, config)
+
+### JsonlSessionStore (`src/coda/memory/store.py`)
+
+`JsonlSessionStore` implements the `SessionStore` Protocol backed by one `.jsonl` file per session in `<workspace>/.coda/sessions/`.
+
+- `create_session(session_id, workspace, model, agents_md_hash)` → writes `SESSION_INIT` as `seq=0`.
+- `append_event(session_id, event)` → appends a single JSONL line.
+- `load_events(session_id)` → reads all events in order.
+- `max_seq(session_id)` → reads only the **last line** for O(1) seq lookup.
+- `list_recent(n)` → reads the `SESSION_INIT` header from each file to build `SessionRow` summaries.
+
+`SessionRow` is a lightweight dataclass (`session_id`, `workspace`, `model`, `started_at`, `event_count`) returned by `list_recent`.
+
+### `coda resume` (`src/coda/cli/resume.py`)
+
+```bash
+coda resume --list                 # show recent sessions
+coda resume <id-or-prefix>         # replay + continue in REPL
+coda resume --root /path <id>      # explicit workspace
+```
+
+Internals:
+1. `_resolve_session_id(store, token)` — exact match or unique prefix match; error on ambiguity.
+2. `store.load_events(session_id)` — load all stored events.
+3. `replay_events(events, context_manager)` — reconstruct `InMemoryContextManager._history` from `USER_MESSAGE`, `ASSISTANT_MESSAGE`, `TOOL_RESULT`, and `COMPRESSION` events.
+4. Drop into the REPL with the restored history.
+
+`ReplayStats` (`src/coda/memory/replay.py`) tracks `messages_restored`, `tool_results_restored`, and `compressed` (bool).
+
+### AGENTS.md 3-tier merge (`src/coda/memory/agents_md.py`)
+
+`load_agents_md(workspace, cwd) -> AgentsMdBundle` collects and merges:
+
+| Tier | Path | Droppable on overflow? |
+|------|------|----------------------|
+| 1 (system) | `~/.config/coda/AGENTS.md` | Yes |
+| 2 (project) | `<workspace>/AGENTS.md` | **No** — always kept |
+| 3 (subdir) | `<cwd>/AGENTS.md` … up to workspace root | Yes (outermost first) |
+
+Rules:
+- Per-file limit: **8K tokens** (truncated with `…[truncated]` suffix).
+- Total limit: **12K tokens** (tiers 1 and 3 are dropped first).
+- The bundle's SHA-256 hash is stored in the `SESSION_INIT` event.
+- Content is injected as a `<project_memory>…</project_memory>` user message at index 0 of `_history`.
+
+### Config loading (`src/coda/core/config.py`)
+
+`CodaConfig` (Pydantic model) covers `model`, `approval`, `max_tool_calls`, `summary_window`, `compress`, `token_ratio`.
+
+`load_config(workspace_root) -> tuple[CodaConfig, list[tuple[Path, str]]]` merges:
+
+1. `~/.config/coda/config.toml` (user, TOML)
+2. `<workspace>/.coda/config.yaml` (workspace, YAML — takes precedence over user)
+
+Precedence chain: **CLI flag > env var > workspace YAML > user TOML > built-in default**.
+
+`main.py` applies config values to Typer options only when `ParameterSource` (from `click.core`) shows the option is still at its default — CLI flags and env vars always win.
+
+`coda doctor` now shows a **Config sources** section listing which files were found and which keys they contribute.
 
 ## When you (the agent) modify this codebase
 

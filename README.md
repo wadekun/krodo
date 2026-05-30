@@ -25,13 +25,14 @@ For full design rationale, see [`docs/architecture.md`](docs/architecture.md).
 | 1 M2 | Full tools (11 tools) + three approval modes + pattern trust | ✅ done |
 | 1 M3 | Context management (token budget + dual compression) + 7 recovery scenarios | ✅ done |
 | 1 M4 | `.codaignore` + git checkpoint + `coda undo` + diff preview | ✅ done |
+| 1 M5 | Persistence + memory: JSONL sessions, `coda resume`, AGENTS.md, config files | ✅ done |
 | 2 | tree-sitter symbol index, repo-map, Textual TUI, MCP client | — |
 | 3 | OS-level sandbox, evaluation harness, OpenTelemetry / Langfuse | — |
 | 4 | Production-grade: Rust hot paths, single-binary distribution, LiteLLM Proxy | — |
 
 ## Quick start
 
-### Try the M3 release (Phase 1 in-progress)
+### Try the M5 release (Phase 1 complete)
 
 ```bash
 git clone https://github.com/<org>/coda
@@ -45,7 +46,7 @@ mkdir -p /tmp/coda-sandbox
 # Headless: run one task and exit
 uv run coda --root /tmp/coda-sandbox "create hello.py that prints Hello Coda, then run it"
 
-# REPL (M4.9): omit the prompt to enter interactive multi-turn mode
+# REPL: omit the prompt to enter interactive multi-turn mode
 uv run coda --root /tmp/coda-sandbox
 # you> create a simple mario game
 # (assistant works, then…)
@@ -57,6 +58,24 @@ In REPL mode the conversation history (including everything the agent did
 in the previous turn) is carried over, so follow-ups like "now add X" or
 "fix the bug from before" work naturally.  Exit with `exit` / `quit` /
 `:q`, Ctrl-D, or two consecutive Ctrl-C presses at the prompt.
+
+### Resuming a previous session (M5)
+
+Sessions are persisted automatically. You can pick up right where you left off:
+
+```bash
+# List recent sessions
+coda resume --list
+
+# Resume by session ID (or unique prefix)
+coda resume a3f2b1
+
+# Resume in a specific workspace
+coda resume --root /tmp/coda-sandbox a3f2b1
+```
+
+`coda resume` replays the stored conversation history into a fresh REPL, so the model
+remembers everything from the prior session — files edited, tools called, and dialogue.
 
 ### Stable release (v0.1 — not yet published)
 
@@ -135,6 +154,47 @@ uv run coda --max-tool-calls 5 "..."
 uv run coda --summary-window 3 "..."
 ```
 
+## Persistence & Memory (M5)
+
+### Session storage
+
+Every session is automatically saved to `.coda/sessions/<session_id>.jsonl` in your workspace. Each line is a JSON event (`USER_MESSAGE`, `ASSISTANT_MESSAGE`, `TOOL_CALL`, `TOOL_RESULT`, `COMPRESSION`, etc.) with a monotonic `seq` number so multi-process appends are safe.
+
+Application logs go to `.coda/logs/<session_id>.log` (pure `structlog` JSONL — separate from session events).
+
+### AGENTS.md — project memory
+
+Place an `AGENTS.md` file anywhere in your project and Coda will inject it automatically into every session as `<project_memory>`:
+
+| Tier | Location | Purpose |
+|------|----------|---------|
+| System | `~/.config/coda/AGENTS.md` | Personal conventions (applies to all workspaces) |
+| Project | `<workspace>/AGENTS.md` | Project-specific rules (always included, never dropped) |
+| Subdir | `<cwd>/AGENTS.md` … up to workspace root | Contextual docs for the directory you're working in |
+
+Each file is limited to 8K tokens; total budget is 12K tokens (subdirectory files are dropped first if the limit is hit).
+
+### Configuration files (M5.4)
+
+Set defaults in `.coda/config.yaml` (workspace) or `~/.config/coda/config.toml` (user-global):
+
+```yaml
+# .coda/config.yaml — workspace-level defaults
+model: anthropic/claude-3-5-sonnet-20241022
+approval: auto_edit
+max_tool_calls: 20
+```
+
+```toml
+# ~/.config/coda/config.toml — user-level defaults (TOML format)
+model = "openai/gpt-4o"
+approval = "full_auto"
+```
+
+Precedence (highest → lowest): CLI flag > environment variable > `.coda/config.yaml` > `~/.config/coda/config.toml` > built-in default.
+
+Run `coda doctor` to see which config files are active and what values they contribute.
+
 ## .codaignore & Git checkpoint (M4)
 
 M4 adds two safety nets: a 4-tier ignore system and automatic git checkpointing before every write.
@@ -195,6 +255,31 @@ coda undo --session <session_id> [--root <workspace>]
 | No CHECKPOINT found | Exit 1 with log path hint |
 | `affected_paths` = workspace root (shell command scope) | Prompts for confirmation before restoring |
 
+## CLI subcommand semantics
+
+Coda has three named subcommands — `resume`, `undo`, and `doctor` — alongside a free-form headless prompt. The parser resolves the two as follows:
+
+| Invocation | Behaviour |
+|---|---|
+| `coda "create a mario game"` | Headless — prompt is `"create a mario game"` |
+| `coda` | Interactive REPL |
+| `coda resume` | Resume subcommand (most recent session) |
+| `coda resume abc123` | Resume subcommand with session ID `abc123` |
+| `coda resume --root /path` | Resume subcommand; `--root` goes to `resume` |
+| `coda --root /path resume` | Resume subcommand; global `--root` inherited as default |
+| `coda undo` | Undo subcommand |
+| `coda doctor` | Doctor subcommand |
+
+**Key rules:**
+
+- The first **non-option** token is checked against registered subcommand names. If it matches, the token triggers subcommand dispatch — it is never treated as the headless prompt.
+- Global flags (`--root`, `--model`, `--approval`, etc.) can go **before or after** the subcommand token. When placed before, they are propagated to the subcommand as defaults; an explicit flag in the subcommand itself always wins.
+- Natural-language prompts should be **quoted** so they arrive as a single token. Without quotes, the first word could match a subcommand name:
+  ```bash
+  coda "resume the work from yesterday"   # ✓ headless with full prompt
+  coda resume the work from yesterday     # ✗ routes to resume subcommand; "the" is unexpected arg
+  ```
+
 ## Local development
 
 Coda uses [`uv`](https://docs.astral.sh/uv/) for dependency and venv management.
@@ -226,7 +311,7 @@ coda/
     llm/        # LLMProvider Protocol + LiteLLM adapter
     tools/      # File / shell / patch / search / git tools
     sandbox/    # Path firewall, command policy, approval modes
-    memory/     # SQLite session store + AGENTS.md loader
+    memory/     # JSONL session store, coda resume, AGENTS.md loader, config
     obs/        # structlog + OpenTelemetry + cost tracker
   tests/{unit,integration,e2e}/
   docs/

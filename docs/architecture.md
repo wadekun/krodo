@@ -16,7 +16,7 @@
 
 ### 0.2 采用假设
 
-- 项目代号 `Coda`，CLI 命令 `coda`，项目级配置 `<project>/.coda/config.yaml`，用户级配置 `~/.config/coda/config.toml`，状态目录 `~/.local/state/coda/`，缓存 `~/.cache/coda/`（遵循 XDG）。
+- 项目代号 `Coda`，CLI 命令 `coda`，项目级配置 `<project>/.coda/config.yaml`，用户级配置 `~/.config/coda/config.toml`，状态目录 `~/.local/state/coda/`，缓存 `~/.cache/coda/`（遵循 XDG）。Session 事件流存储于项目级 `<workspace>/.coda/sessions/`（XDG 例外，理由：session 内容强绑定项目、sandbox 下运行不污染 `~/`、`coda resume` 默认按当前项目作用域，99% 场景符合用户直觉）。
 - 主语言采用 Python 3.12+（理由见 §3.1），Rust 作为后期性能/安全模块的辅助语言。
 - 项目以 Apache-2.0 开源，仓库结构按 Python `src/` layout 单包组织（`src/coda/{cli,core,llm,tools,sandbox,memory,obs,...}`，详见 §6.1）。
 - 采用 LiteLLM 作为 LLM 抽象层底座（理由与争议见 §3.2.A），上层自封 `LLMProvider` Protocol 隔离。
@@ -266,7 +266,7 @@ Shell 执行：
 
 状态与记忆：
 - 短期：内存中的 `messages` list + token 预算管理（`tiktoken` 估算）。
-- 持久化：`SQLite`（标准库 `sqlite3`，零依赖）存 session、message、tool_call、cost。
+- 持久化：**JSONL 事件流**（Phase 1，零依赖，人可读）——`SessionStore` Protocol + `JsonlSessionStore` 实现，每 session 一个 `.jsonl` 文件，首行为 `SESSION_INIT` header。SQLite 留 Phase 2 引入（cost dashboard / FTS5 搜索），作为 `SessionStore` Protocol 的第二个实现，YAGNI。
 - 长期记忆：`AGENTS.md` 自动加载（项目根 + 子目录层级合并），用户级 `~/.config/coda/AGENTS.md`。
 - Phase 3+ 可选向量记忆：`sqlite-vec` 或 `lancedb`（轻量、零运维）。
 
@@ -448,10 +448,12 @@ class SessionEvent(BaseModel):
 
 
 class SessionStore(Protocol):
-    def create(self, project_root: Path) -> str: ...        # returns session_id
-    def append_event(self, session_id: str, event: SessionEvent) -> None: ...
-    def load(self, session_id: str) -> list[SessionEvent]: ...
-    def list_recent(self, limit: int = 10) -> list[dict]: ...
+    def create_session(self, session_id: str, *, model: str | None,
+                       agents_md_hash: str | None, initial_prompt_hash: str | None) -> None: ...
+    def append_event(self, event: SessionEvent) -> None: ...
+    def load_events(self, session_id: str) -> list[SessionEvent]: ...
+    def max_seq(self, session_id: str) -> int: ...        # -1 if no events
+    def list_recent(self, *, limit: int = 10) -> list[SessionRow]: ...
 ```
 
 设计要点：
@@ -460,6 +462,7 @@ class SessionStore(Protocol):
 - `Tool.requires_approval` 是默认值；实际审批由 `ApprovalManager.check()` 基于 mode + 名称 + 参数 + 策略规则动态决定（如 `read_file` 默认无需审批，但读 `.env` 必弹审批）。
 - `ApprovalManager` 返回值含 `approve_session` / `approve_pattern`，对应"本次会话信任 / 永久信任此模式"两类常用 UX。
 - `SessionStore` 用 event-sourcing 风格 + 强制 `seq` 字段，保证可重放，对应硬约束 §0.3 第 4 条。
+- **Phase 1 实现：`JsonlSessionStore`**（每 session 一个 `.jsonl`，首行为 `SESSION_INIT` header，`list_recent` 只读首行，O(N sessions)）。SQLite 后端留 Phase 2 作为同一 Protocol 的第二个实现。
 
 #### 3.4.2 Workspace（一等执行上下文）
 
@@ -482,6 +485,7 @@ class Workspace(BaseModel):
     root: Path                 # 路径围栏基准；fs 工具 resolve 后必须 is_relative_to(root)
     config_path: Path          # root / ".coda" / "config.yaml"
     memory_paths: list[Path]   # [root/AGENTS.md, ~/.config/coda/AGENTS.md]，按存在性过滤
+                               # 注意：子目录 AGENTS.md 由 load_agents_md() 动态 walk 发现（M5.3），不在此列表中
     git_root: Path | None      # checkpoint/undo 目标仓库；非 git 仓库时为 None
     source: Literal["flag", "env", "marker", "cwd"]  # 用于审计日志与启动 banner
     discovered_at: datetime
@@ -998,7 +1002,7 @@ coda/
 - **1.5 工具集（11 个）** — 产出：§5.2 全部工具 + Pydantic schema + 注册装饰器 ｜ 验收：每个工具单测覆盖 100%；工具结果格式一致；错误统一格式。
 - **1.6 审批 + 沙箱** — 产出：`coda/sandbox` 路径围栏 + 危险命令黑名单 + 三档审批 ｜ 验收：CI 包含 path traversal、symlink escape、危险命令注入的安全测试。
 - **1.7 `.codaignore` + Git checkpoint** — 产出：`.codaignore` 加载与匹配；每次写操作前自动 checkpoint ｜ 验收：`coda undo` 能回退到上一 checkpoint。
-- **1.8 持久化与记忆** — 产出：SQLite event-sourcing session + `AGENTS.md` 加载（项目+用户层）｜ 验收：`coda resume <id>` 完整恢复对话。
+- **1.8 持久化与记忆** — 产出：JSONL event-sourcing session（`SessionStore` Protocol + `JsonlSessionStore` 实现，SQLite 后端 Phase 2 再加）+ `AGENTS.md` 加载（项目+用户层）｜ 验收：`coda resume <id>` 完整恢复对话。
 - **1.9 可观测性** — 产出：structlog JSONL 日志 + cost log + secret redactor ｜ 验收：每个 tool call 有 trace 行；日志中无任何 API key 字面量。
 - **1.10 CLI** — 产出：Typer 入口 + REPL（prompt_toolkit）+ `coda exec` headless + Rich 流式 / diff 渲染 ｜ 验收：三种入口（REPL / `exec` / pipe stdin）皆可用。
 - **1.11 文档与发布** — 产出：README、QUICKSTART、ARCHITECTURE（本文）、CONTRIBUTING、SECURITY、CHANGELOG ｜ 验收：发布 v0.1 到 PyPI + GitHub Release，`pipx install coda` 可用。
@@ -1059,7 +1063,7 @@ coda/
   2. Agent Loop（最核心、最简单、必须自己写不要依赖框架）
   3. 11 个核心工具 + Pydantic schema（fs 5 + 搜索 1 + shell 1 + patch 1 + git 3，详见 §5.2）
   4. 三档审批 + 路径围栏 + 危险命令黑名单
-  5. SQLite session + AGENTS.md
+  5. JSONL session（`JsonlSessionStore`）+ `AGENTS.md`
   6. CLI（Typer + Rich）
   7. 结构化日志 + cost tracker
 - **暂时不要做的模块**（点名）：
@@ -1078,6 +1082,8 @@ coda/
 ---
 
 ## 10. 变更日志
+
+- 2026-05-27 v0.6（M5）：`SessionStore` Protocol + `JsonlSessionStore` 实现落地。SQLite 后端推迟到 Phase 2（YAGNI：JSONL 零依赖、人可读、`coda undo` 零回归）。目录拆分：`.coda/logs/` 原来的混合文件拆为 `.coda/sessions/<id>.jsonl`（纯 JSONL session 事件流，首行为 `SESSION_INIT` header）+ `.coda/logs/<id>.log`（structlog 应用日志，`FileHandler` formatter 修为 `%(message)s` 产出纯 JSON 行）。`SessionEventLogger` 新增 `from_store` 工厂，跨进程 `seq` 续接 bug 修复（bootstrap from `store.max_seq + 1`）。M5.2 新增 `coda resume`；M5.3 新增 AGENTS.md 三层合并注入；M5.4 新增 config 文件加载。
 
 - 2026-05-15 v0.5：把 Phase 0 prototype.py 的 ROOT bug（用户在 `/tmp/coda-sandbox` 启动却写到 coda 项目目录、路径围栏同时失效）沉淀为架构强约束。`Workspace` 升格为一等子系统 + Protocol 契约 + 强制不变量。主要变更：
   - §1 子系统计数 10 → 11，新增 Workspace（cross-cutting）。
