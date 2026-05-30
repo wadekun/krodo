@@ -56,7 +56,7 @@ def test_configure_logging_creates_log_file(tmp_path: Path) -> None:
     configure_logging(ws, "test-session-001")
     log_path = get_session_log_path(ws, "test-session-001")
     assert log_path.exists()
-    assert log_path.suffix == ".jsonl"
+    assert log_path.suffix == ".log"  # M5.1: changed from .jsonl to .log
 
 
 def test_configure_logging_returns_logger(tmp_path: Path) -> None:
@@ -72,7 +72,7 @@ def test_log_file_written_to_coda_logs_dir(tmp_path: Path) -> None:
     configure_logging(ws, "test-session-003")
     log_dir = tmp_path / ".coda" / "logs"
     assert log_dir.is_dir()
-    assert (log_dir / "test-session-003.jsonl").exists()
+    assert (log_dir / "test-session-003.log").exists()  # M5.1: .log extension
 
 
 def test_log_entry_written(tmp_path: Path) -> None:
@@ -104,7 +104,7 @@ def test_secret_not_written_to_log(tmp_path: Path) -> None:
 def test_get_session_log_path_correct_location(tmp_path: Path) -> None:
     ws = LocalWorkspaceResolver().resolve(explicit=tmp_path)
     path = get_session_log_path(ws, "abc-123")
-    assert path == tmp_path / ".coda" / "logs" / "abc-123.jsonl"
+    assert path == tmp_path / ".coda" / "logs" / "abc-123.log"  # M5.1: .log extension
 
 
 # ---------------------------------------------------------------------------

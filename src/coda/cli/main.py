@@ -30,14 +30,19 @@ import typer
 
 from coda.cli.banner import print_banner
 from coda.cli.doctor import register_doctor_app
+from coda.cli.group import CodaGroup
+from coda.cli.resume import register_resume_app
 from coda.cli.undo import register_undo_app
 from coda.core.budget import BudgetCalculator, get_context_window
 from coda.core.compression import make_compressor
+from coda.core.config import load_config
 from coda.core.context import InMemoryContextManager
 from coda.core.events import SessionEventLogger
 from coda.core.loop import AgentLoop, LoopConfig
 from coda.core.workspace import LocalWorkspaceResolver, Workspace
 from coda.llm.litellm_provider import LiteLLMProvider
+from coda.memory.agents_md import load_agents_md
+from coda.memory.store import JsonlSessionStore, SessionStore
 from coda.obs.logger import configure_logging, get_session_log_path
 from coda.sandbox.approval import TerminalApprovalManager
 from coda.sandbox.checkpoint import GitCheckpointManager
@@ -58,6 +63,7 @@ if TYPE_CHECKING:
 
 app = typer.Typer(
     name="coda",
+    cls=CodaGroup,
     help="Coda — local-first AI coding agent.",
     add_completion=False,
     no_args_is_help=False,
@@ -66,6 +72,7 @@ app = typer.Typer(
 
 # Register sub-commands (add_typer does not change the main callback behaviour)
 register_undo_app(app)
+register_resume_app(app)
 register_doctor_app(app)
 
 _DEFAULT_MODEL = "anthropic/claude-3-5-sonnet-20241022"
@@ -106,22 +113,24 @@ class SessionComponents:
     logger: logging.Logger
     session_id: str
     event_logger: SessionEventLogger
-    log_path: Path
+    store: SessionStore
+    sessions_path: Path   # <workspace>/.coda/sessions/<id>.jsonl — event log
+    log_path: Path        # <workspace>/.coda/logs/<id>.log — structlog application log
     max_tokens: int
 
 
-def _collect_written_paths(log_path: Path) -> list[str]:
-    """Return deduplicated file paths from CHECKPOINT events in the session log.
+def _collect_written_paths(sessions_path: Path) -> list[str]:
+    """Return deduplicated file paths from CHECKPOINT events in the session JSONL.
 
-    Reads the JSONL log; returns an empty list if the log is missing or
-    unparseable.
+    Reads the session event file (``<workspace>/.coda/sessions/<id>.jsonl``);
+    returns an empty list if the file is missing or unparseable.
     """
     paths: list[str] = []
     seen: set[str] = set()
     try:
-        if not log_path.exists():
+        if not sessions_path.exists():
             return paths
-        for raw in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        for raw in sessions_path.read_text(encoding="utf-8", errors="replace").splitlines():
             stripped = raw.strip()
             if not stripped:
                 continue
@@ -146,21 +155,20 @@ def print_session_summary(components: SessionComponents, turns: int | None = Non
     mode (called once when the user exits). Pass `turns` to also display the
     cumulative turn count (REPL only); headless mode omits it.
     """
-    written_paths = _collect_written_paths(components.log_path)
+    written_paths = _collect_written_paths(components.sessions_path)
     typer.echo("", err=True)
     typer.echo("─── session summary ───────────────────", err=True)
     typer.echo(f"workspace  : {components.workspace.root}", err=True)
     if turns is not None:
         typer.echo(f"turns      : {turns}", err=True)
     # tool_calls cannot be aggregated from TurnResult here (REPL has many turns);
-    # the JSONL log is the source of truth for per-session totals.  Headless
-    # mode passes its result.tool_calls_made through this helper via `turns=None`
-    # and prints its own line below for backward compat.
+    # the session JSONL is the source of truth for per-session totals.
     if written_paths:
         typer.echo("files written:", err=True)
         for p in written_paths:
             typer.echo(f"  {p}", err=True)
-    typer.echo(f"session log: {components.log_path}", err=True)
+    typer.echo(f"session    : {components.sessions_path}", err=True)
+    typer.echo(f"log        : {components.log_path}", err=True)
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +247,44 @@ def main(
     if ctx.invoked_subcommand is not None:
         return
 
+    # M5.4: Load config file defaults, applying them where CLI/env left defaults
+    resolved_root = (
+        root.expanduser().resolve()
+        if root is not None
+        else None
+    )
+    # We need workspace root to load config; use a quick resolver here
+    _quick_ws_root = resolved_root or _quick_resolve_root()
+    cfg, _cfg_sources = load_config(_quick_ws_root)
+
+    from click.core import ParameterSource  # noqa: PLC0415
+
+    # Apply config values where CLI flag is still at built-in default
+    if cfg.model is not None and ctx.get_parameter_source("model") == ParameterSource.DEFAULT:
+        model = cfg.model
+    if cfg.api_base is not None and ctx.get_parameter_source("api_base") == ParameterSource.DEFAULT:
+        api_base = cfg.api_base
+    if (
+        cfg.approval is not None
+        and ctx.get_parameter_source("approval") == ParameterSource.DEFAULT
+    ):
+        approval = cfg.approval
+    if (
+        cfg.max_tokens is not None
+        and ctx.get_parameter_source("max_tokens") == ParameterSource.DEFAULT
+    ):
+        max_tokens = cfg.max_tokens
+    if (
+        cfg.max_tool_calls is not None
+        and ctx.get_parameter_source("max_tool_calls") == ParameterSource.DEFAULT
+    ):
+        max_tool_calls = cfg.max_tool_calls
+    if (
+        cfg.summary_window is not None
+        and ctx.get_parameter_source("summary_window") == ParameterSource.DEFAULT
+    ):
+        summary_window = cfg.summary_window
+
     import asyncio  # noqa: PLC0415
 
     async def _entry() -> None:
@@ -264,6 +310,30 @@ def main(
 
 
 # ---------------------------------------------------------------------------
+# Config helpers
+# ---------------------------------------------------------------------------
+
+
+def _quick_resolve_root() -> Path:
+    """Best-effort workspace root for config loading (before full resolver runs).
+
+    Uses the same priority chain as LocalWorkspaceResolver but avoids
+    constructing a full Workspace (which validates writability, etc.).
+    """
+    import os as _os  # noqa: PLC0415
+
+    env = _os.environ.get("CODA_ROOT")
+    if env:
+        return Path(env).expanduser().resolve()
+
+    cwd = Path.cwd().resolve()
+    for parent in [cwd, *cwd.parents]:
+        if (parent / ".coda").exists() or (parent / ".git").exists():
+            return parent
+    return cwd
+
+
+# ---------------------------------------------------------------------------
 # Session bootstrap (formerly inlined inside _async_main)
 # ---------------------------------------------------------------------------
 
@@ -278,6 +348,7 @@ def _build_session_components(
     max_tool_calls: int = 15,
     max_tokens: int = 16384,
     summary_window: int = 2,  # noqa: ARG001  (reserved for M5 compactor wiring)
+    resume_session_id: str | None = None,
 ) -> SessionComponents:
     """Wire workspace, logger, banner, provider, tools, and AgentLoop.
 
@@ -285,8 +356,16 @@ def _build_session_components(
     `_run_headless` (single turn) or `run_repl` (multi-turn).
     Banner is printed exactly once here — REPL mode reuses these
     components, so the banner naturally appears only on session start.
+
+    Parameters
+    ----------
+    resume_session_id:
+        When set, reuse the existing session with this ID instead of
+        generating a new one.  ``store.create_session`` is NOT called
+        (the session already exists); the event logger bootstraps its
+        ``_seq`` from ``store.max_seq(session_id) + 1``.
     """
-    session_id = str(uuid.uuid4())[:8]
+    session_id = resume_session_id or str(uuid.uuid4())[:8]
 
     # 1. Resolve workspace
     resolver = LocalWorkspaceResolver()
@@ -358,8 +437,33 @@ def _build_session_components(
     except ValueError:
         compressor = make_compressor(strategy="algorithmic")
 
-    # M3: Session event logger
-    event_logger = SessionEventLogger.from_workspace_path(session_id, workspace.root)
+    # M5.3: Pre-compute AGENTS.md bundle so the hash can go into SESSION_INIT
+    bundle = load_agents_md(workspace, cwd=Path.cwd(), count_fn=provider.count_tokens)
+
+    # M5.1: Session store + event logger
+    store = JsonlSessionStore(workspace.root / ".coda" / "sessions")
+    if resume_session_id is None:
+        # New session — write the SESSION_INIT header (seq=0)
+        store.create_session(
+            session_id,
+            model=model,
+            agents_md_hash=bundle.sha256(),
+            initial_prompt_hash=None,
+        )
+    else:
+        # Show resume banner now that store is available
+        from rich.console import Console as _RichConsole  # noqa: PLC0415, N814
+
+        prior_events = store.load_events(resume_session_id)
+        user_turns = sum(1 for e in prior_events if e.type.value == "user_message")
+        _RichConsole(stderr=True).print(
+            f"[dim]Resuming session {resume_session_id} "
+            f"({user_turns} prior turn(s), {len(prior_events)} events)[/dim]"
+        )
+
+    # When resuming, the session file already has events; from_store bootstraps
+    # _seq from store.max_seq so cross-process appends never repeat a seq value.
+    event_logger = SessionEventLogger.from_store(store, session_id, logger=logger)
 
     registry = ToolRegistry()
     # M1 tools
@@ -410,6 +514,27 @@ def _build_session_components(
         compressor=compressor,
     )
 
+    # M5.3: Inject AGENTS.md bundle into the context manager history
+    if bundle.content:
+        from rich.console import Console as _RichConsole2  # noqa: N814, PLC0415
+
+        from coda.core.types import Message as _Msg  # noqa: PLC0415
+
+        loop.context_manager._history.insert(  # noqa: SLF001
+            0,
+            _Msg(
+                role="user",
+                content=f"<project_memory>\n{bundle.content}\n</project_memory>",
+            ),
+        )
+        source_names = ", ".join(p.name for p in bundle.sources)
+        truncation_warn = " [yellow](truncated)[/yellow]" if bundle.truncated else ""
+        _RichConsole2(stderr=True).print(
+            f"[dim]memory: {len(bundle.sources)} file(s), "
+            f"{bundle.total_tokens:,} tokens ({source_names}){truncation_warn}[/dim]"
+        )
+
+    sessions_path = workspace.root / ".coda" / "sessions" / f"{session_id}.jsonl"
     log_path = Path(str(get_session_log_path(workspace, session_id)))
 
     return SessionComponents(
@@ -418,6 +543,8 @@ def _build_session_components(
         logger=logger,
         session_id=session_id,
         event_logger=event_logger,
+        store=store,
+        sessions_path=sessions_path,
         log_path=log_path,
         max_tokens=max_tokens,
     )
@@ -465,7 +592,7 @@ def _echo_turn_result(result: TurnResult) -> None:
 
 def _print_headless_summary(components: SessionComponents, result: TurnResult) -> None:
     """Headless-mode summary preserves the original layout (tool calls line)."""
-    written_paths = _collect_written_paths(components.log_path)
+    written_paths = _collect_written_paths(components.sessions_path)
     typer.echo("", err=True)
     typer.echo("─── session summary ───────────────────", err=True)
     typer.echo(f"workspace  : {components.workspace.root}", err=True)
@@ -474,4 +601,5 @@ def _print_headless_summary(components: SessionComponents, result: TurnResult) -
         typer.echo("files written:", err=True)
         for p in written_paths:
             typer.echo(f"  {p}", err=True)
-    typer.echo(f"session log: {components.log_path}", err=True)
+    typer.echo(f"session    : {components.sessions_path}", err=True)
+    typer.echo(f"log        : {components.log_path}", err=True)

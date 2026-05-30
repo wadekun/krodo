@@ -86,9 +86,31 @@ async def _async_doctor(
     from rich.table import Table  # noqa: PLC0415
 
     from coda.core.budget import get_context_window  # noqa: PLC0415
+    from coda.core.config import load_config  # noqa: PLC0415
 
     console = Console()
     console.print("\n[bold cyan]coda doctor[/bold cyan] — LLM connectivity check\n")
+
+    # ----------------------------------------------------------------
+    # Config sources (M5.4)
+    # ----------------------------------------------------------------
+    from pathlib import Path as _Path  # noqa: PLC0415
+
+    _workspace_root = _Path.cwd()
+    _cfg, _cfg_sources = load_config(_workspace_root)
+    if _cfg_sources:
+        console.print("[bold]config sources[/bold]")
+        src_grid = Table.grid(padding=(0, 2))
+        for src in _cfg_sources:
+            src_grid.add_row("", f"[dim]{src}[/dim]")
+        if _cfg.model is not None:
+            src_grid.add_row("  model", f"[dim]{_cfg.model}[/dim]")
+        if _cfg.max_tokens is not None:
+            src_grid.add_row("  max_tokens", f"[dim]{_cfg.max_tokens:,}[/dim]")
+        if _cfg.approval is not None:
+            src_grid.add_row("  approval", f"[dim]{_cfg.approval}[/dim]")
+        console.print(src_grid)
+        console.print()
 
     # ----------------------------------------------------------------
     # Configuration summary

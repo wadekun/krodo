@@ -1,8 +1,14 @@
-"""Structured logging for Coda — JSONL trace file + secret redactor.
+"""Structured logging for Coda — application log file + secret redactor.
 
 configure_logging(workspace, session_id) sets up structlog to write:
   - human-readable output to stderr (for the terminal)
-  - machine-readable JSONL to <workspace.root>/.coda/logs/<session_id>.jsonl
+  - pure JSON-per-line to <workspace.root>/.coda/logs/<session_id>.log
+
+Note: session *events* (SessionEventLogger) are stored separately in
+``<workspace.root>/.coda/sessions/<session_id>.jsonl`` — a distinct file with
+a different schema.  This separation prevents the mixed-file bug where
+stdlib log prefixes (``INFO:coda.session.abc:``) would break JSON parsing of
+the event stream.
 
 Secret redactor (stub for M1): replaces common API key patterns with
 "[REDACTED]" so they never appear in log files.  M6 will expand the pattern
@@ -109,11 +115,16 @@ def configure_logging(workspace: Any, session_id: str) -> logging.Logger:
 
     log_dir = ws.root / ".coda" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / f"{session_id}.jsonl"
+    # .log extension (not .jsonl) to avoid confusion with session event files
+    log_path = log_dir / f"{session_id}.log"
 
-    # File handler — JSONL, one entry per line
+    # File handler — pure JSON-per-line (structlog JSONRenderer output).
+    # Formatter must be "%(message)s" so the stdlib handler doesn't prepend
+    # "INFO:coda.session.abc:" before the JSON blob — that prefix would break
+    # any downstream parser that expects clean JSON lines.
     file_handler = logging.FileHandler(log_path, encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(logging.Formatter("%(message)s"))
     file_handler.addFilter(_SecretRedactorFilter())
 
     # Stream handler — human-readable to stderr
@@ -169,8 +180,12 @@ def configure_logging(workspace: Any, session_id: str) -> logging.Logger:
 
 
 def get_session_log_path(workspace: Any, session_id: str) -> Path:
-    """Return the path to the JSONL log file for *session_id*."""
+    """Return the path to the structlog application log file for *session_id*.
+
+    This is the ``.log`` file in ``.coda/logs/`` — NOT the session event JSONL
+    which lives in ``.coda/sessions/<session_id>.jsonl``.
+    """
     from coda.core.workspace import Workspace
 
     ws: Workspace = workspace
-    return ws.root / ".coda" / "logs" / f"{session_id}.jsonl"
+    return ws.root / ".coda" / "logs" / f"{session_id}.log"

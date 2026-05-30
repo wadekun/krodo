@@ -81,13 +81,13 @@ async def test_undo_reverts_written_file(tmp_path: Path) -> None:
     sha = await mgr.create([readme])
     assert sha is not None, "Dirty tracked file should produce a stash SHA"
 
-    # Write the CHECKPOINT event to the session JSONL
+    # Write the CHECKPOINT event to the session JSONL (now in .coda/sessions/)
     session_id = "e2e-test"
-    logs_dir = tmp_path / ".coda" / "logs"
-    logs_dir.mkdir(parents=True)
-    jsonl_path = logs_dir / f"{session_id}.jsonl"
+    from coda.memory.store import JsonlSessionStore  # noqa: PLC0415
 
-    event_logger = SessionEventLogger(session_id=session_id, jsonl_path=jsonl_path)
+    store = JsonlSessionStore(tmp_path / ".coda" / "sessions")
+    store.create_session(session_id, model=None, agents_md_hash=None, initial_prompt_hash=None)
+    event_logger = SessionEventLogger.from_store(store, session_id)
     event_logger.emit(
         SessionEventType.CHECKPOINT,
         data={
@@ -96,6 +96,7 @@ async def test_undo_reverts_written_file(tmp_path: Path) -> None:
             "tool": "write_file",
         },
     )
+    jsonl_path = tmp_path / ".coda" / "sessions" / f"{session_id}.jsonl"
 
     assert readme.read_text() == "agent-modified\n"
 
@@ -134,11 +135,11 @@ async def test_undo_reverts_edited_file(tmp_path: Path) -> None:
     assert sha is not None
 
     session_id = "e2e-edit"
-    logs_dir = tmp_path / ".coda" / "logs"
-    logs_dir.mkdir(parents=True)
-    jsonl_path = logs_dir / f"{session_id}.jsonl"
+    from coda.memory.store import JsonlSessionStore  # noqa: PLC0415
 
-    event_logger = SessionEventLogger(session_id=session_id, jsonl_path=jsonl_path)
+    store = JsonlSessionStore(tmp_path / ".coda" / "sessions")
+    store.create_session(session_id, model=None, agents_md_hash=None, initial_prompt_hash=None)
+    event_logger = SessionEventLogger.from_store(store, session_id)
     event_logger.emit(
         SessionEventType.CHECKPOINT,
         data={"sha": sha, "affected_paths": [str(readme)], "tool": "edit_file"},
@@ -159,19 +160,24 @@ def test_undo_non_git_workspace_exits_1(tmp_path: Path) -> None:
     """Non-git workspace: undo exits with code 1 and does not crash."""
     import typer  # noqa: PLC0415
 
-    # Write a fake checkpoint event
-    logs = tmp_path / ".coda" / "logs"
-    logs.mkdir(parents=True)
-    f = logs / "sess.jsonl"
-    event = {
+    from coda.memory.store import JsonlSessionStore  # noqa: PLC0415
+
+    # Write a fake checkpoint event to the sessions dir
+    sessions_dir = tmp_path / ".coda" / "sessions"
+    store = JsonlSessionStore(sessions_dir)
+    store.create_session("sess", model=None, agents_md_hash=None, initial_prompt_hash=None)
+
+    f = sessions_dir / "sess.jsonl"
+    checkpoint_event = {
         "id": "e1",
         "session_id": "sess",
-        "seq": 0,
+        "seq": 1,
         "type": "checkpoint",
         "timestamp": datetime.now(tz=UTC).isoformat(),
         "data": {"sha": "a" * 40, "affected_paths": [str(tmp_path / "x.py")]},
     }
-    f.write_text(json.dumps(event) + "\n")
+    with f.open("a") as fh:
+        fh.write(json.dumps(checkpoint_event) + "\n")
 
     with pytest.raises(typer.Exit) as exc_info:
         undo_command(_workspace_root=tmp_path)

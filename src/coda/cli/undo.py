@@ -1,6 +1,6 @@
 """coda undo — restore files to the previous git checkpoint (M4 PR4).
 
-Reads the JSONL session event log (``<workspace>/.coda/logs/<session_id>.jsonl``)
+Reads the JSONL session event log (``<workspace>/.coda/sessions/<session_id>.jsonl``)
 to find the most recent ``CHECKPOINT`` event, then restores only the paths listed
 in that checkpoint's ``affected_paths`` via ``git checkout <sha> -- <paths>``.
 
@@ -29,7 +29,7 @@ import typer
 from coda.core.workspace import LocalWorkspaceResolver
 from coda.sandbox.checkpoint import CheckpointError, GitCheckpointManager
 
-_LOGS_DIR_NAME = ".coda/logs"
+_SESSIONS_DIR_NAME = ".coda/sessions"
 
 
 def undo_command(
@@ -46,7 +46,7 @@ def undo_command(
         Workspace root path.  Defaults to auto-discovery.
     session:
         Session ID (JSONL filename stem).  Defaults to the most recently
-        modified JSONL file found in ``<workspace>/.coda/logs/``.
+        modified JSONL file found in ``<workspace>/.coda/sessions/``.
     _workspace_root:
         Test-only injection of a resolved workspace root (skips resolver).
     """
@@ -62,15 +62,17 @@ def undo_command(
         workspace = resolver.resolve(explicit=root)
         workspace_root = workspace.root
 
-    # Find the JSONL file
-    logs_dir = workspace_root / _LOGS_DIR_NAME
-    jsonl_path = _resolve_jsonl(logs_dir, session)
+    # Find the JSONL file in the sessions directory
+    sessions_dir = workspace_root / _SESSIONS_DIR_NAME
+    jsonl_path = _resolve_jsonl(sessions_dir, session)
     if jsonl_path is None:
         if session:
-            console.print(f"[red]No session log found for session '{session}' in {logs_dir}[/red]")
+            console.print(
+                f"[red]No session file found for session '{session}' in {sessions_dir}[/red]"
+            )
         else:
             console.print(
-                f"[red]No session logs found in {logs_dir}. "
+                f"[red]No session files found in {sessions_dir}. "
                 "Did you run coda in this workspace?[/red]"
             )
         raise typer.Exit(code=1)
@@ -238,6 +240,6 @@ def register_undo_app(app: typer.Typer) -> None:
         ),
     ) -> None:
         """Restore files to the previous checkpoint created by Coda."""
-        undo_command(root=root, session=session)
+        undo_command(root=root, session=session)  # type: ignore[arg-type]
 
     app.add_typer(undo_sub)

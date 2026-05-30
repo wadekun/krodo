@@ -58,6 +58,19 @@ class Workspace(BaseModel):
         except ValueError:
             return False
 
+    def discover_subdir_agents_md(self, cwd: Path) -> list[tuple[Path, str]]:
+        """Walk *cwd* up to *self.root*, collecting intermediate AGENTS.md files.
+
+        Returns outer-to-inner order (deepest last), excluding the project-root
+        AGENTS.md (tier 2) which is handled separately by ``load_agents_md``.
+
+        Delegates to :func:`coda.memory.agents_md.discover_subdir_agents_md`
+        to keep the discovery logic co-located with the rest of the merge code.
+        """
+        from coda.memory.agents_md import discover_subdir_agents_md  # noqa: PLC0415
+
+        return discover_subdir_agents_md(self, cwd)
+
 
 @runtime_checkable
 class WorkspaceResolver(Protocol):

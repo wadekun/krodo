@@ -1,0 +1,137 @@
+"""Session replay — reconstruct conversation history from stored events (M5.2).
+
+``replay_events`` walks a list of ``SessionEvent`` records and reconstructs the
+``InMemoryContextManager`` history so a resumed session feels like a continuation
+of the previous one.
+
+Mapping table (see M5.2 spec):
+  USER_MESSAGE      → ctx.add_user_input(data["content"])
+  ASSISTANT_MESSAGE → ctx.append_assistant(Message(...))
+  TOOL_RESULT       → ctx.append_tool_result(ToolResult(...))
+  COMPRESSION       → replace preceding replayed messages with the summary block
+  TOOL_CALL         → skip (already embedded in ASSISTANT_MESSAGE data)
+  CHECKPOINT / UNDO / APPROVAL_DECISION / ERROR / SESSION_INIT / COST_SNAPSHOT
+                    → skip (metadata only)
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from coda.core.types import Message, SessionEventType, ToolResult
+
+if TYPE_CHECKING:
+    from coda.core.context import InMemoryContextManager
+    from coda.core.types import SessionEvent
+
+
+# ---------------------------------------------------------------------------
+# ReplayStats
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ReplayStats:
+    """Summary of what was replayed."""
+
+    turns: int            # number of complete user-assistant exchanges
+    messages_restored: int  # total messages appended to history
+    compressed: bool      # True if at least one COMPRESSION event was encountered
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+def replay_events(
+    events: list[SessionEvent],
+    ctx: InMemoryContextManager,
+) -> ReplayStats:
+    """Reconstruct *ctx._history* from *events*.
+
+    Events are processed in ``seq`` order.  The context manager is mutated
+    in place; existing history is left intact (allows pre-pending
+    ``<project_memory>`` before calling replay).
+
+    Returns :class:`ReplayStats` with counts for banner display.
+    """
+    # Sort by seq for deterministic replay (load_events already does this,
+    # but defensive sort here costs O(N log N) and protects callers that pass
+    # unsorted lists).
+    sorted_events = sorted(events, key=lambda e: e.seq)
+
+    turns = 0
+    messages_restored = 0
+    compressed = False
+
+    for event in sorted_events:
+        et = event.type
+        data = event.data
+
+        if et == SessionEventType.SESSION_INIT:
+            # Header event — no history to replay
+            continue
+
+        elif et == SessionEventType.USER_MESSAGE:
+            content = str(data.get("content", ""))
+            if content:
+                ctx.add_user_input(content)
+                messages_restored += 1
+                turns += 1
+
+        elif et == SessionEventType.ASSISTANT_MESSAGE:
+            content = data.get("content", "")
+            tool_calls_raw = data.get("tool_calls")
+            from coda.core.types import ToolCall  # noqa: PLC0415
+
+            tool_calls = None
+            if tool_calls_raw and isinstance(tool_calls_raw, list):
+                try:
+                    tool_calls = [ToolCall.model_validate(tc) for tc in tool_calls_raw]
+                except Exception:  # noqa: BLE001
+                    tool_calls = None
+
+            msg = Message(
+                role="assistant",
+                content=str(content) if content else "",
+                tool_calls=tool_calls,
+            )
+            ctx.append_assistant(msg)
+            messages_restored += 1
+
+        elif et == SessionEventType.TOOL_RESULT:
+            tool_call_id = str(data.get("tool_call_id", ""))
+            content = str(data.get("content", ""))
+            is_error = bool(data.get("is_error", False))
+            result = ToolResult(
+                tool_call_id=tool_call_id,
+                content=content,
+                is_error=is_error,
+            )
+            ctx.append_tool_result(result)
+            messages_restored += 1
+
+        elif et == SessionEventType.COMPRESSION:
+            # Replace the currently replayed history with the compressed summary.
+            # The compression event's data["summary"] is the already-compressed
+            # representation; we inject it as a single user message so the LLM
+            # sees "here's what happened before" without the raw history.
+            summary = str(data.get("summary", ""))
+            if summary:
+                ctx._history.clear()  # noqa: SLF001 — intentional direct mutation
+                ctx.add_user_input(
+                    f"[Context compressed — summary of earlier conversation]\n{summary}"
+                )
+                messages_restored = 1  # reset: only the summary remains
+                compressed = True
+
+        # All other event types (TOOL_CALL, CHECKPOINT, UNDO, APPROVAL_DECISION,
+        # ERROR, COST_SNAPSHOT) are metadata-only — skip.
+
+    return ReplayStats(
+        turns=turns,
+        messages_restored=messages_restored,
+        compressed=compressed,
+    )

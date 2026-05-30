@@ -109,8 +109,8 @@ def test_cli_banner_shows_workspace_root(tmp_path: Path) -> None:
     assert "coda" in result.output.lower()
 
 
-def test_cli_creates_jsonl_log(tmp_path: Path) -> None:
-    """A JSONL log file must be created in .coda/logs/."""
+def test_cli_creates_session_files(tmp_path: Path) -> None:
+    """After a run: session JSONL in .coda/sessions/ and app log in .coda/logs/."""
     runner = CliRunner()
     responses = [Message(role="assistant", content="logged")]
 
@@ -120,10 +120,44 @@ def test_cli_creates_jsonl_log(tmp_path: Path) -> None:
             ["--root", str(tmp_path), "log this"],
         )
 
+    # Session events → .coda/sessions/*.jsonl
+    sessions_dir = tmp_path / ".coda" / "sessions"
+    assert sessions_dir.is_dir()
+    session_files = list(sessions_dir.glob("*.jsonl"))
+    assert len(session_files) >= 1
+
+    # Application log → .coda/logs/*.log (NOT .jsonl)
     log_dir = tmp_path / ".coda" / "logs"
     assert log_dir.is_dir()
-    log_files = list(log_dir.glob("*.jsonl"))
+    log_files = list(log_dir.glob("*.log"))
     assert len(log_files) >= 1
+    # Old mixed .jsonl should no longer exist in logs dir
+    old_jsonl_files = list(log_dir.glob("*.jsonl"))
+    assert len(old_jsonl_files) == 0
+
+
+def test_cli_writes_session_init_header(tmp_path: Path) -> None:
+    """After a run, the session file's first line is a SESSION_INIT event."""
+    import json as _json  # noqa: PLC0415
+
+    runner = CliRunner()
+    responses = [Message(role="assistant", content="hi")]
+
+    with _patch_provider(responses):
+        runner.invoke(
+            app,
+            ["--root", str(tmp_path), "say hi"],
+        )
+
+    sessions_dir = tmp_path / ".coda" / "sessions"
+    jsonl_files = list(sessions_dir.glob("*.jsonl"))
+    assert len(jsonl_files) >= 1
+
+    first_line = jsonl_files[0].read_text().splitlines()[0]
+    obj = _json.loads(first_line)
+    assert obj["type"] == "session_init"
+    assert obj["seq"] == 0
+    assert "model" in obj["data"]
 
 
 def test_cli_tool_call_roundtrip(tmp_path: Path) -> None:

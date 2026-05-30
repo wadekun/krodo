@@ -182,9 +182,10 @@ class TestUndoCommandNonGit:
         assert exc_info.value.exit_code == 1
 
     def test_exits_1_if_no_checkpoint_in_log(self, tmp_path: Path) -> None:
-        logs = tmp_path / ".coda" / "logs"
-        logs.mkdir(parents=True)
-        f = logs / "sess.jsonl"
+        # M5.1: sessions now live in .coda/sessions/, not .coda/logs/
+        sessions = tmp_path / ".coda" / "sessions"
+        sessions.mkdir(parents=True)
+        f = sessions / "sess.jsonl"
         # Write a non-checkpoint event
         event = {
             "id": "e1",
@@ -200,9 +201,10 @@ class TestUndoCommandNonGit:
         assert exc_info.value.exit_code == 1
 
     def test_exits_1_for_non_git_workspace_with_checkpoint(self, tmp_path: Path) -> None:
-        logs = tmp_path / ".coda" / "logs"
-        logs.mkdir(parents=True)
-        f = logs / "sess.jsonl"
+        # M5.1: sessions now live in .coda/sessions/, not .coda/logs/
+        sessions = tmp_path / ".coda" / "sessions"
+        sessions.mkdir(parents=True)
+        f = sessions / "sess.jsonl"
         _write_checkpoint_event(f, sha="a" * 40, affected_paths=[str(tmp_path / "hello.py")])
         # tmp_path is not a git repo → should exit 1 with error message
         with pytest.raises(typer.Exit) as exc_info:
@@ -242,10 +244,10 @@ class TestUndoCommandGit:
 
         assert stash_sha, "dirty tracked file should produce a stash SHA"
 
-        # Write the checkpoint event
-        logs = tmp_path / ".coda" / "logs"
-        logs.mkdir(parents=True)
-        f = logs / "sess.jsonl"
+        # Write the checkpoint event to the sessions dir (M5.1 migration)
+        sessions = tmp_path / ".coda" / "sessions"
+        sessions.mkdir(parents=True)
+        f = sessions / "sess.jsonl"
         _write_checkpoint_event(f, sha=stash_sha, affected_paths=[str(readme)])
 
         # Now run undo — should revert readme.txt to "modified\n" (the stash state)
@@ -277,9 +279,10 @@ class TestUndoCommandGit:
         ).stdout.strip()
         assert stash_sha
 
-        logs = tmp_path / ".coda" / "logs"
-        logs.mkdir(parents=True)
-        f = logs / "sess.jsonl"
+        # M5.1: sessions now live in .coda/sessions/, not .coda/logs/
+        sessions = tmp_path / ".coda" / "sessions"
+        sessions.mkdir(parents=True)
+        f = sessions / "sess.jsonl"
         _write_checkpoint_event(f, sha=stash_sha, affected_paths=[str(readme)])
 
         undo_command(_workspace_root=tmp_path)

@@ -1,20 +1,23 @@
-"""SessionEventLogger — structured JSONL event emitter (M3).
+"""SessionEventLogger — structured JSONL event emitter (M3, updated M5.1).
 
-Wraps the existing JSONL logger to provide a typed, sequenced interface for
-emitting SessionEvent records at key agent-loop boundaries.
-
-All events are written to the same JSONL file used by configure_logging()
-(``<workspace>/.coda/logs/<session_id>.jsonl``) so that cost dashboards,
-replay tools, and tracing backends (Langfuse) can consume a single stream.
+Wraps a ``SessionStore`` (or an optional fallback ``jsonl_path``) to provide
+a typed, sequenced interface for emitting SessionEvent records at key
+agent-loop boundaries.
 
 Usage::
 
-    logger = SessionEventLogger(session_id="abc123", jsonl_logger=log)
-    await logger.emit(SessionEventType.USER_MESSAGE, data={"content": "..."})
-    await logger.emit(SessionEventType.COMPRESSION, data={"strategy": "llm"})
+    store = JsonlSessionStore(sessions_dir)
+    logger = SessionEventLogger.from_store(store, session_id="abc123")
+    logger.emit(SessionEventType.USER_MESSAGE, data={"content": "..."})
 
-The ``seq`` counter is monotonically increasing and is not thread-safe by
-design (the agent loop is single-threaded async).
+Cross-process seq correctness (M5.1 fix):
+    ``from_store`` bootstraps ``self._seq`` by calling
+    ``store.max_seq(session_id) + 1``, so a new logger instance that appends
+    to an existing session (e.g. ``coda resume``, ``coda undo``) will never
+    repeat a ``seq`` value.
+
+The ``seq`` counter is not thread-safe by design (the agent loop is
+single-threaded async).
 """
 
 from __future__ import annotations
@@ -23,37 +26,51 @@ import logging
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from coda.core.types import SessionEvent, SessionEventType
 
+if TYPE_CHECKING:
+    from coda.memory.store import SessionStore
+
 
 class SessionEventLogger:
-    """Emit typed, sequenced SessionEvents to a JSONL sink.
+    """Emit typed, sequenced SessionEvents to a SessionStore sink.
 
     Parameters
     ----------
     session_id:
         Unique identifier for the current session.  Embedded in every event.
+    store:
+        ``SessionStore`` implementation used for persistence.  When ``None``,
+        events are only forwarded to the stdlib *logger* at DEBUG level (useful
+        for unit tests that don't need file I/O).
     jsonl_path:
-        Path to the JSONL file to write events to.  Created on first emit.
-        If None, events are only passed to the stdlib *logger* at DEBUG level.
+        Deprecated legacy parameter — used only for the ``coda undo``
+        cross-process appends that run outside the normal session lifecycle.
+        Prefer ``from_store`` for new call sites.
     logger:
-        stdlib logger used for debug-level event logging when no JSONL path
-        is set, or for error logging if JSONL writes fail.
+        stdlib logger for debug-level event tracing and error reporting.
     """
 
     def __init__(
         self,
         session_id: str,
         *,
+        store: SessionStore | None = None,
         jsonl_path: Path | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         self._session_id = session_id
-        self._jsonl_path = jsonl_path
+        self._store = store
+        self._jsonl_path = jsonl_path  # legacy fallback
         self._logger = logger or logging.getLogger(__name__)
-        self._seq = 0
+
+        # Bootstrap seq from existing storage to prevent duplicates on resume.
+        if store is not None:
+            self._seq = store.max_seq(session_id) + 1
+        else:
+            self._seq = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -66,7 +83,7 @@ class SessionEventLogger:
         data: dict[str, Any] | None = None,
         event_id: str | None = None,
     ) -> SessionEvent:
-        """Emit a single SessionEvent and write it to the JSONL sink.
+        """Emit a single SessionEvent and persist it to the store.
 
         Parameters
         ----------
@@ -77,8 +94,7 @@ class SessionEventLogger:
         event_id:
             Optional explicit UUID string.  Auto-generated if omitted.
 
-        Returns the emitted SessionEvent (useful for tests and for passing to
-        context_manager as a compression_event payload).
+        Returns the emitted SessionEvent.
         """
         event = SessionEvent(
             id=event_id or str(uuid.uuid4()),
@@ -89,15 +105,14 @@ class SessionEventLogger:
             data=data or {},
         )
         self._seq += 1
-
         self._write(event)
         return event
 
     def emit_from(self, event: SessionEvent) -> SessionEvent:
-        """Re-emit a SessionEvent that was created elsewhere (e.g. by a Compressor).
+        """Re-emit a SessionEvent created elsewhere (e.g. by a Compressor).
 
-        Overwrites the event's session_id and seq to maintain sequence integrity.
-        Returns the updated event.
+        Overwrites the event's session_id and seq to maintain sequence
+        integrity.  Returns the updated event.
         """
         updated = SessionEvent(
             id=event.id,
@@ -124,24 +139,44 @@ class SessionEventLogger:
     # ------------------------------------------------------------------
 
     def _write(self, event: SessionEvent) -> None:
-        """Write *event* as a JSONL line.  Logs a warning on I/O failure."""
-        line = event.model_dump_json() + "\n"
-
+        """Persist *event* via the store (preferred) or legacy jsonl_path."""
         self._logger.debug("session_event type=%s seq=%d", event.type, event.seq)
 
-        if self._jsonl_path is None:
+        if self._store is not None:
+            self._store.append_event(event)
             return
 
+        # Legacy path: direct JSONL append (used by coda undo cross-process)
+        if self._jsonl_path is None:
+            return
+        line = event.model_dump_json() + "\n"
         try:
             self._jsonl_path.parent.mkdir(parents=True, exist_ok=True)
             with self._jsonl_path.open("a", encoding="utf-8") as fh:
                 fh.write(line)
         except OSError as exc:
-            self._logger.warning("Failed to write session event to %s: %s", self._jsonl_path, exc)
+            self._logger.warning(
+                "Failed to write session event to %s: %s", self._jsonl_path, exc
+            )
 
     # ------------------------------------------------------------------
-    # Factory
+    # Factories
     # ------------------------------------------------------------------
+
+    @classmethod
+    def from_store(
+        cls,
+        store: SessionStore,
+        session_id: str,
+        *,
+        logger: logging.Logger | None = None,
+    ) -> SessionEventLogger:
+        """Preferred factory: create a logger backed by a SessionStore.
+
+        Bootstraps ``_seq`` from ``store.max_seq(session_id) + 1`` so that
+        cross-process appends (resume, undo) never repeat a seq value.
+        """
+        return cls(session_id=session_id, store=store, logger=logger)
 
     @classmethod
     def from_workspace_path(
@@ -151,9 +186,12 @@ class SessionEventLogger:
         *,
         logger: logging.Logger | None = None,
     ) -> SessionEventLogger:
-        """Create a SessionEventLogger that writes to the standard JSONL path.
+        """Deprecated: creates a logger using a legacy direct jsonl_path.
 
-        Path: ``<workspace_root>/.coda/logs/<session_id>.jsonl``
+        Kept for backward-compatibility with older undo tests.  New callers
+        should use ``from_store`` instead.
+
+        Path: ``<workspace_root>/.coda/sessions/<session_id>.jsonl``
         """
-        jsonl_path = workspace_root / ".coda" / "logs" / f"{session_id}.jsonl"
+        jsonl_path = workspace_root / ".coda" / "sessions" / f"{session_id}.jsonl"
         return cls(session_id=session_id, jsonl_path=jsonl_path, logger=logger)
