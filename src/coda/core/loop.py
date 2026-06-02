@@ -295,7 +295,10 @@ class AgentLoop:
             self.context_manager.append_assistant(response)
             self._emit(
                 SessionEventType.ASSISTANT_MESSAGE,
-                tool_calls=[{"name": tc.name, "id": tc.id} for tc in (response.tool_calls or [])],
+                tool_calls=[
+                    {"name": tc.name, "id": tc.id, "arguments": tc.arguments}
+                    for tc in (response.tool_calls or [])
+                ],
             )
 
             had_invalid_args = False

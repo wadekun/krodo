@@ -129,6 +129,47 @@ class TestReplayToolCallRoundTrip:
         assert history[2].role == "tool"
         assert history[2].tool_call_id == tool_call_id
         assert history[3].role == "assistant"
+        # arguments round-trip fully (full-fidelity persistence)
+        assert history[1].tool_calls[0].arguments == {"path": "foo.txt"}
+        assert history[1].tool_calls[0].id == tool_call_id
+
+    def test_replay_legacy_tool_calls_without_arguments(self) -> None:
+        """Older sessions persisted only name+id; replay must still rebuild.
+
+        Missing ``arguments`` defaults to ``{}`` so the tool_use/tool_result
+        pairing (keyed by id) survives and is re-sent correctly to the LLM.
+        """
+        ctx = _ctx()
+        tool_call_id = "tc-legacy"
+        events = [
+            _event(SessionEventType.USER_MESSAGE, 1, {"content": "read foo.txt"}),
+            _event(
+                SessionEventType.ASSISTANT_MESSAGE,
+                2,
+                {
+                    "content": "",
+                    # legacy format: no "arguments" key
+                    "tool_calls": [{"id": tool_call_id, "name": "read_file"}],
+                },
+            ),
+            _event(
+                SessionEventType.TOOL_RESULT,
+                3,
+                {"tool_call_id": tool_call_id, "content": "contents", "is_error": False},
+            ),
+        ]
+
+        replay_events(events, ctx)
+
+        history = ctx.history
+        assert history[1].tool_calls is not None
+        assert len(history[1].tool_calls) == 1
+        tc = history[1].tool_calls[0]
+        assert tc.name == "read_file"
+        assert tc.id == tool_call_id
+        assert tc.arguments == {}
+        # id preserved so it pairs with the tool result
+        assert history[2].tool_call_id == tool_call_id
 
 
 # ---------------------------------------------------------------------------

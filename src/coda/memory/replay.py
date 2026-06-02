@@ -89,7 +89,19 @@ def replay_events(
             tool_calls = None
             if tool_calls_raw and isinstance(tool_calls_raw, list):
                 try:
-                    tool_calls = [ToolCall.model_validate(tc) for tc in tool_calls_raw]
+                    # Build leniently: persisted events may omit `arguments`
+                    # (older sessions stored only name+id). Default missing
+                    # arguments to {} so the tool_use/tool_result pairing (keyed
+                    # by id) survives replay and is re-sent correctly to the LLM.
+                    tool_calls = [
+                        ToolCall(
+                            id=str(tc.get("id", "")),
+                            name=str(tc.get("name", "")),
+                            arguments=tc.get("arguments", {}) or {},
+                        )
+                        for tc in tool_calls_raw
+                        if isinstance(tc, dict)
+                    ]
                 except Exception:  # noqa: BLE001
                     tool_calls = None
 
