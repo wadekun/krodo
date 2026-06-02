@@ -126,6 +126,11 @@ def resume_command(
                 f"{stats.turns} user turn(s). {note}Starting REPL…[/dim]"
             )
 
+            _print_conversation_history(
+                components.loop.context_manager.history,
+                workspace_root,
+            )
+
         await run_repl(components)
 
     asyncio.run(_entry())
@@ -134,6 +139,190 @@ def resume_command(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _print_conversation_history(
+    history: list,
+    workspace_root: Path | None = None,
+) -> None:
+    """Print a compact summary of the replayed conversation to stderr.
+
+    Assistant messages come in two shapes in a ReAct loop:
+      * tool-call messages — ``content`` is empty, ``tool_calls`` is populated;
+        rendered as ``[called <tool> <arg>]``.
+      * text replies — ``content`` has the natural-language answer.
+
+    The display window is anchored on *user turns* (not raw message count) so
+    that the most recent user prompts stay visible even when a single turn
+    produced many tool-call messages.
+
+    Consecutive tool-call assistant messages are grouped into runs.  Only the
+    first ``max_tool_lines_per_run`` lines of each run are shown; the tail is
+    folded into a single ``... +k more tool calls`` line.
+    """
+    from rich.console import Console  # noqa: PLC0415
+
+    max_user_turns = 3
+    assistant_truncate = 120
+    max_tool_lines_per_run = 5
+
+    # Filter to user + assistant messages only (tool-result rows are noise here).
+    visible = [m for m in history if m.role in ("user", "assistant")]
+    if not visible:
+        return
+
+    # Anchor the window on the most recent ``max_user_turns`` user messages so
+    # the "you" prompts are never pushed out by a long tool-call sequence.
+    user_indices = [i for i, m in enumerate(visible) if m.role == "user"]
+    if len(user_indices) > max_user_turns:
+        start = user_indices[-max_user_turns]
+    else:
+        start = 0
+    show = visible[start:]
+
+    console = Console(stderr=True)
+    console.print("[dim]" + "\u2500" * 3 + " previous conversation " + "\u2500" * 27 + "[/dim]")
+    if start > 0:
+        console.print(
+            f"[dim]  showing last {max_user_turns} turn(s) "
+            f"of {len(user_indices)} ({len(visible)} messages total)[/dim]"
+        )
+
+    # Walk ``show`` grouping consecutive tool-call messages into runs.
+    i = 0
+    while i < len(show):
+        msg = show[i]
+        if _is_tool_call_msg(msg):
+            # Collect the full run of consecutive tool-call messages.
+            run = [msg]
+            j = i + 1
+            while j < len(show) and _is_tool_call_msg(show[j]):
+                run.append(show[j])
+                j += 1
+
+            # Print up to max_tool_lines_per_run lines, then fold the rest.
+            for m in run[:max_tool_lines_per_run]:
+                line = _format_history_line(m, assistant_truncate, workspace_root)
+                if line is not None:
+                    console.print(line)
+            tail = run[max_tool_lines_per_run:]
+            if tail:
+                extra = sum(
+                    len(getattr(m, "tool_calls", None) or []) or 1 for m in tail
+                )
+                console.print(f"[dim]          \u2026 +{extra} more tool calls[/dim]")
+            i = j
+        else:
+            line = _format_history_line(msg, assistant_truncate, workspace_root)
+            if line is not None:
+                console.print(line)
+            i += 1
+
+
+def _is_tool_call_msg(msg: object) -> bool:
+    """Return True when *msg* is an assistant message whose content is empty and
+    ``tool_calls`` is non-empty (i.e. a ReAct tool-invocation step)."""
+    if getattr(msg, "role", None) != "assistant":
+        return False
+    raw = getattr(msg, "content", None)
+    content = raw if isinstance(raw, str) else ""
+    if content.strip():
+        return False
+    return bool(getattr(msg, "tool_calls", None))
+
+
+def _format_history_line(
+    msg: object,
+    truncate: int,
+    workspace_root: Path | None = None,
+) -> str | None:
+    """Render one history message as a dim stderr line, or None to skip it."""
+    role = getattr(msg, "role", None)
+    raw_content = getattr(msg, "content", None)
+    content = raw_content if isinstance(raw_content, str) else ""
+    content = content.strip()
+
+    if role == "user":
+        return f"[dim] you   {content}[/dim]"
+
+    # assistant text reply
+    if content:
+        if len(content) > truncate:
+            content = content[: truncate - 3] + "..."
+        return f"[dim] asst  {content}[/dim]"
+
+    # No text content — summarise the tool calls instead of printing a blank.
+    tool_calls = getattr(msg, "tool_calls", None)
+    if tool_calls:
+        summaries = [
+            _tool_call_summary(tc, workspace_root)
+            for tc in tool_calls
+            if getattr(tc, "name", "")
+        ]
+        names = ", ".join(summaries)
+        if names:
+            # Escape the opening bracket so Rich renders it literally instead of
+            # treating "[called ...]" as console markup (which would blank it out).
+            return f"[dim] asst  \\[called {names}][/dim]"
+    # Empty content and no tool calls — defensive skip.
+    return None
+
+
+def _tool_call_summary(tc: object, workspace_root: Path | None) -> str:
+    """Return ``"<name> <key-arg>"`` for a tool call, or just ``"<name>"``."""
+    name = getattr(tc, "name", "") or ""
+    arg = _key_arg(getattr(tc, "arguments", None), workspace_root)
+    return f"{name} {arg}" if arg else name
+
+
+_PATH_KEYS = frozenset({"path", "file_path", "file", "filename", "target", "source"})
+_OTHER_KEYS = frozenset({"pattern", "query", "command", "cmd", "url", "text"})
+_ARG_TRUNCATE = 40
+
+
+def _key_arg(arguments: object, workspace_root: Path | None) -> str:
+    """Extract the most informative single argument string from a tool-call dict.
+
+    Priority:
+    1. Path-ish keys — rendered relative to *workspace_root* when possible.
+    2. Other common informational keys (pattern, query, command, …).
+    3. First string value in the dict as a fallback.
+
+    Returns an empty string when nothing useful can be extracted.
+    """
+    if not isinstance(arguments, dict) or not arguments:
+        return ""
+
+    def _render_path(raw: object) -> str:
+        val = str(raw) if not isinstance(raw, str) else raw
+        if not val:
+            return ""
+        if workspace_root is not None:
+            try:
+                rel = Path(val).relative_to(workspace_root)
+                val = str(rel)
+            except ValueError:
+                pass
+        return _truncate(val)
+
+    for key in _PATH_KEYS:
+        if key in arguments:
+            return _render_path(arguments[key])
+
+    for key in _OTHER_KEYS:
+        if key in arguments:
+            return _truncate(str(arguments[key]))
+
+    # Fallback: first string value
+    for v in arguments.values():
+        if isinstance(v, str) and v:
+            return _truncate(v)
+
+    return ""
+
+
+def _truncate(s: str) -> str:
+    return s if len(s) <= _ARG_TRUNCATE else s[: _ARG_TRUNCATE - 3] + "..."
 
 
 def _resolve_session_id(
