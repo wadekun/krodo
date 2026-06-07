@@ -171,6 +171,42 @@ class TestReplayToolCallRoundTrip:
         # id preserved so it pairs with the tool result
         assert history[2].tool_call_id == tool_call_id
 
+    def test_replay_tool_call_with_narration_content(self) -> None:
+        """ASSISTANT_MESSAGE with both content and tool_calls must restore both.
+
+        This locks in the fix for the persistence bug where narration text
+        ("我会帮你创建…") was silently dropped when a message also carried
+        tool calls.  Both fields must survive the event-log round-trip.
+        """
+        ctx = _ctx()
+        tool_call_id = "tc-narrate"
+        events = [
+            _event(SessionEventType.USER_MESSAGE, 1, {"content": "build something"}),
+            _event(
+                SessionEventType.ASSISTANT_MESSAGE,
+                2,
+                {
+                    "content": "我会帮你创建游戏文件。",
+                    "tool_calls": [
+                        {"id": tool_call_id, "name": "write_file", "arguments": {"path": "game.js"}}
+                    ],
+                },
+            ),
+            _event(
+                SessionEventType.TOOL_RESULT,
+                3,
+                {"tool_call_id": tool_call_id, "content": "ok", "is_error": False},
+            ),
+        ]
+
+        replay_events(events, ctx)
+
+        asst_msg = ctx.history[1]
+        assert asst_msg.content == "我会帮你创建游戏文件。"
+        assert asst_msg.tool_calls is not None
+        assert asst_msg.tool_calls[0].name == "write_file"
+        assert asst_msg.tool_calls[0].arguments == {"path": "game.js"}
+
 
 # ---------------------------------------------------------------------------
 # 3. Compression event

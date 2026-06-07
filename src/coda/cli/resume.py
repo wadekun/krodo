@@ -147,18 +147,19 @@ def _print_conversation_history(
 ) -> None:
     """Print a compact summary of the replayed conversation to stderr.
 
-    Assistant messages come in two shapes in a ReAct loop:
-      * tool-call messages — ``content`` is empty, ``tool_calls`` is populated;
-        rendered as ``[called <tool> <arg>]``.
-      * text replies — ``content`` has the natural-language answer.
+    Each message is expanded to one or more display entries by
+    ``_history_entries``:
+      * user message          -> one "text" entry
+      * assistant text reply  -> one "text" entry
+      * assistant tool calls  -> one "tool" entry per message
+      * assistant with BOTH   -> "text" entry then "tool" entry
 
-    The display window is anchored on *user turns* (not raw message count) so
-    that the most recent user prompts stay visible even when a single turn
-    produced many tool-call messages.
+    Consecutive "tool" entries across the flat list are grouped; only the
+    first ``max_tool_lines_per_run`` are shown, the tail folds into a
+    ``... +k more tool calls`` line.
 
-    Consecutive tool-call assistant messages are grouped into runs.  Only the
-    first ``max_tool_lines_per_run`` lines of each run are shown; the tail is
-    folded into a single ``... +k more tool calls`` line.
+    The display window is anchored on *user turns* so the most recent
+    prompts stay visible even when a turn produced many tool-call messages.
     """
     from rich.console import Console  # noqa: PLC0415
 
@@ -180,6 +181,16 @@ def _print_conversation_history(
         start = 0
     show = visible[start:]
 
+    # Flatten messages into (kind, rendered_line, weight) entries.
+    # kind:   "text" for narration/user lines, "tool" for [called X] lines.
+    # weight: number of actual tool calls in this entry (used for fold count).
+    entries: list[tuple[str, str, int]] = []
+    for msg in show:
+        entries.extend(_history_entries(msg, assistant_truncate, workspace_root))
+
+    if not entries:
+        return
+
     console = Console(stderr=True)
     console.print("[dim]" + "\u2500" * 3 + " previous conversation " + "\u2500" * 27 + "[/dim]")
     if start > 0:
@@ -188,71 +199,57 @@ def _print_conversation_history(
             f"of {len(user_indices)} ({len(visible)} messages total)[/dim]"
         )
 
-    # Walk ``show`` grouping consecutive tool-call messages into runs.
+    # Walk the flat entry list, folding consecutive "tool" runs.
     i = 0
-    while i < len(show):
-        msg = show[i]
-        if _is_tool_call_msg(msg):
-            # Collect the full run of consecutive tool-call messages.
-            run = [msg]
+    while i < len(entries):
+        kind, line, weight = entries[i]
+        if kind == "tool":
+            # Collect the full consecutive run of tool entries.
+            run = [(line, weight)]
             j = i + 1
-            while j < len(show) and _is_tool_call_msg(show[j]):
-                run.append(show[j])
+            while j < len(entries) and entries[j][0] == "tool":
+                run.append((entries[j][1], entries[j][2]))
                 j += 1
 
-            # Print up to max_tool_lines_per_run lines, then fold the rest.
-            for m in run[:max_tool_lines_per_run]:
-                line = _format_history_line(m, assistant_truncate, workspace_root)
-                if line is not None:
-                    console.print(line)
+            for ln, _ in run[:max_tool_lines_per_run]:
+                console.print(ln)
             tail = run[max_tool_lines_per_run:]
             if tail:
-                extra = sum(
-                    len(getattr(m, "tool_calls", None) or []) or 1 for m in tail
-                )
+                extra = sum(w or 1 for _, w in tail)
                 console.print(f"[dim]          \u2026 +{extra} more tool calls[/dim]")
             i = j
         else:
-            line = _format_history_line(msg, assistant_truncate, workspace_root)
-            if line is not None:
-                console.print(line)
+            console.print(line)
             i += 1
 
 
-def _is_tool_call_msg(msg: object) -> bool:
-    """Return True when *msg* is an assistant message whose content is empty and
-    ``tool_calls`` is non-empty (i.e. a ReAct tool-invocation step)."""
-    if getattr(msg, "role", None) != "assistant":
-        return False
-    raw = getattr(msg, "content", None)
-    content = raw if isinstance(raw, str) else ""
-    if content.strip():
-        return False
-    return bool(getattr(msg, "tool_calls", None))
-
-
-def _format_history_line(
+def _history_entries(
     msg: object,
     truncate: int,
     workspace_root: Path | None = None,
-) -> str | None:
-    """Render one history message as a dim stderr line, or None to skip it."""
+) -> list[tuple[str, str, int]]:
+    """Expand one history message into ``(kind, line, weight)`` display entries.
+
+    A message that carries both narration text and tool calls yields two
+    entries: the "text" entry first (narration), then the "tool" entry
+    (``[called X]`` summary).  This ensures both are visible on resume.
+    """
     role = getattr(msg, "role", None)
     raw_content = getattr(msg, "content", None)
-    content = raw_content if isinstance(raw_content, str) else ""
-    content = content.strip()
+    content = (raw_content if isinstance(raw_content, str) else "").strip()
+    tool_calls = getattr(msg, "tool_calls", None) or []
+
+    entries: list[tuple[str, str, int]] = []
 
     if role == "user":
-        return f"[dim] you   {content}[/dim]"
+        return [("text", f"[dim] you   {content}[/dim]", 0)]
 
-    # assistant text reply
+    # assistant
     if content:
         if len(content) > truncate:
             content = content[: truncate - 3] + "..."
-        return f"[dim] asst  {content}[/dim]"
+        entries.append(("text", f"[dim] asst  {content}[/dim]", 0))
 
-    # No text content — summarise the tool calls instead of printing a blank.
-    tool_calls = getattr(msg, "tool_calls", None)
     if tool_calls:
         summaries = [
             _tool_call_summary(tc, workspace_root)
@@ -261,11 +258,12 @@ def _format_history_line(
         ]
         names = ", ".join(summaries)
         if names:
-            # Escape the opening bracket so Rich renders it literally instead of
-            # treating "[called ...]" as console markup (which would blank it out).
-            return f"[dim] asst  \\[called {names}][/dim]"
-    # Empty content and no tool calls — defensive skip.
-    return None
+            # Escape "[" so Rich does not treat it as markup.
+            line = f"[dim] asst  \\[called {names}][/dim]"
+            entries.append(("tool", line, len(tool_calls)))
+
+    # Empty content and no tool calls — skip (defensive).
+    return entries
 
 
 def _tool_call_summary(tc: object, workspace_root: Path | None) -> str:

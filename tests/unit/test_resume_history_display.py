@@ -4,6 +4,7 @@ Covers:
 - Empty "asst" lines are replaced with [called <tool> <arg>] summaries.
 - Path arguments are rendered relative to the workspace root.
 - Consecutive tool-call runs are folded after 5 lines.
+- Mixed messages (narration + tool calls) emit BOTH a text line and a tool line.
 - Display window is anchored on user turns.
 """
 
@@ -11,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from coda.cli.resume import _format_history_line, _key_arg, _print_conversation_history
+from coda.cli.resume import _history_entries, _key_arg, _print_conversation_history
 from coda.core.types import Message, ToolCall
 
 
@@ -28,32 +29,37 @@ def _tc(name: str, arguments: dict | None = None, tc_id: str = "x") -> ToolCall:
 
 
 # ---------------------------------------------------------------------------
-# _format_history_line
+# _history_entries
 # ---------------------------------------------------------------------------
 
 
-class TestFormatHistoryLine:
+class TestHistoryEntries:
     def test_user_line(self) -> None:
-        line = _format_history_line(_user("hello there"), 120)
-        assert line is not None
+        entries = _history_entries(_user("hello there"), 120)
+        assert len(entries) == 1
+        kind, line, weight = entries[0]
+        assert kind == "text"
         assert "you" in line
         assert "hello there" in line
+        assert weight == 0
 
     def test_assistant_text_line(self) -> None:
-        line = _format_history_line(_asst("the answer is 42"), 120)
-        assert line is not None
+        entries = _history_entries(_asst("the answer is 42"), 120)
+        assert len(entries) == 1
+        kind, line, weight = entries[0]
+        assert kind == "text"
         assert "asst" in line
         assert "the answer is 42" in line
 
     def test_assistant_text_truncated(self) -> None:
         long = "x" * 300
-        line = _format_history_line(_asst(long), 120)
-        assert line is not None
+        entries = _history_entries(_asst(long), 120)
+        assert len(entries) == 1
+        _, line, _ = entries[0]
         assert line.endswith("...[/dim]")
-        assert len(line) < 200
 
     def test_tool_call_message_summarised_without_root(self) -> None:
-        """Empty content + tool_calls => [called name arg] summary, never blank."""
+        """Empty content + tool_calls => one tool entry, never blank."""
         msg = _asst(
             content="",
             tool_calls=[
@@ -61,11 +67,29 @@ class TestFormatHistoryLine:
                 ToolCall(id="2", name="grep", arguments={}),
             ],
         )
-        line = _format_history_line(msg, 120)
-        assert line is not None
-        # without a workspace root the path is kept verbatim
+        entries = _history_entries(msg, 120)
+        assert len(entries) == 1
+        kind, line, weight = entries[0]
+        assert kind == "tool"
         assert "read_file /abs/game.js" in line
         assert "grep" in line
+        assert weight == 2
+
+    def test_mixed_message_yields_two_entries(self) -> None:
+        """A message with both content and tool_calls emits text THEN tool."""
+        msg = _asst(
+            content="我会帮你创建游戏文件。",
+            tool_calls=[ToolCall(id="1", name="write_file", arguments={"path": "game.js"})],
+        )
+        entries = _history_entries(msg, 120)
+        assert len(entries) == 2
+        kinds = [k for k, _, _ in entries]
+        assert kinds == ["text", "tool"]
+        _, text_line, _ = entries[0]
+        assert "我会帮你创建游戏文件" in text_line
+        _, tool_line, weight = entries[1]
+        assert "write_file game.js" in tool_line
+        assert weight == 1
 
     def test_tool_call_path_relative_to_workspace(self) -> None:
         root = Path("/private/tmp/coda-sandbox")
@@ -79,26 +103,20 @@ class TestFormatHistoryLine:
                 ),
             ],
         )
-        line = _format_history_line(msg, 120, workspace_root=root)
-        assert line is not None
+        entries = _history_entries(msg, 120, workspace_root=root)
+        assert len(entries) == 1
+        _, line, _ = entries[0]
         assert "read_file game.js" in line
-        # absolute prefix gone
         assert "/private" not in line
 
     def test_tool_call_path_outside_workspace_kept(self) -> None:
         root = Path("/private/tmp/coda-sandbox")
         msg = _asst(
             content="",
-            tool_calls=[
-                ToolCall(
-                    id="1",
-                    name="read_file",
-                    arguments={"path": "/etc/hosts"},
-                ),
-            ],
+            tool_calls=[ToolCall(id="1", name="read_file", arguments={"path": "/etc/hosts"})],
         )
-        line = _format_history_line(msg, 120, workspace_root=root)
-        assert line is not None
+        entries = _history_entries(msg, 120, workspace_root=root)
+        _, line, _ = entries[0]
         assert "/etc/hosts" in line
 
     def test_tool_call_pattern_arg_shown(self) -> None:
@@ -106,12 +124,12 @@ class TestFormatHistoryLine:
             content="",
             tool_calls=[ToolCall(id="1", name="grep", arguments={"pattern": "playSound"})],
         )
-        line = _format_history_line(msg, 120)
-        assert line is not None
+        entries = _history_entries(msg, 120)
+        _, line, _ = entries[0]
         assert "grep playSound" in line
 
-    def test_empty_assistant_without_tool_calls_skipped(self) -> None:
-        assert _format_history_line(_asst(""), 120) is None
+    def test_empty_assistant_without_tool_calls_yields_nothing(self) -> None:
+        assert _history_entries(_asst(""), 120) == []
 
 
 # ---------------------------------------------------------------------------
@@ -236,3 +254,19 @@ class TestPrintConversationHistory:
         _print_conversation_history(history)
         err = capsys.readouterr().err
         assert "All done!" in err
+
+    def test_mixed_message_shows_both_narration_and_tool(self, capsys) -> None:
+        """Message with content + tool_calls must show narration then [called X]."""
+        history = [
+            _user("build it"),
+            _asst(
+                content="我会帮你创建游戏文件。",
+                tool_calls=[_tc("write_file", {"path": "game.js"})],
+            ),
+        ]
+        _print_conversation_history(history)
+        err = capsys.readouterr().err
+        assert "我会帮你创建游戏文件" in err
+        assert "write_file game.js" in err
+        # narration must appear before the tool summary
+        assert err.index("我会帮你创建游戏文件") < err.index("write_file")

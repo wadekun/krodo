@@ -295,6 +295,7 @@ class AgentLoop:
             self.context_manager.append_assistant(response)
             self._emit(
                 SessionEventType.ASSISTANT_MESSAGE,
+                content=response.content if isinstance(response.content, str) else "",
                 tool_calls=[
                     {"name": tc.name, "id": tc.id, "arguments": tc.arguments}
                     for tc in (response.tool_calls or [])
