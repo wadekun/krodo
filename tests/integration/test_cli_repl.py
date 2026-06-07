@@ -215,3 +215,60 @@ def test_repl_no_prompt_does_not_print_help(tmp_path: Path) -> None:
     # must NOT appear when entering REPL mode.
     assert "Usage:" not in result.output
     assert "REPL mode" in result.output
+
+
+# ---------------------------------------------------------------------------
+# TTY path — prompt_toolkit branch
+# ---------------------------------------------------------------------------
+
+
+def test_repl_tty_path_uses_prompt_toolkit(tmp_path: Path) -> None:
+    """On a real TTY the REPL uses PromptSession.prompt_async.
+
+    We patch sys.stdin.isatty to return True and replace prompt_async with
+    an AsyncMock that yields scripted lines then raises EOFError, verifying
+    that:
+      - prompt_toolkit's prompt_async is called (not builtins.input),
+      - multi-turn history is still preserved across turns,
+      - the REPL exits cleanly on EOFError from prompt_async.
+    """
+    from prompt_toolkit import PromptSession  # noqa: PLC0415
+
+    provider = _ScriptedProvider(
+        [
+            Message(role="assistant", content="ptk answer one"),
+            Message(role="assistant", content="ptk answer two"),
+        ]
+    )
+
+    scripted = ["ptk question one", "ptk question two"]
+    call_count = 0
+
+    async def _fake_prompt_async(self: object, prompt: str = "") -> str:  # noqa: ARG001
+        nonlocal call_count
+        if call_count < len(scripted):
+            result = scripted[call_count]
+            call_count += 1
+            return result
+        raise EOFError
+
+    runner = CliRunner()
+    with (
+        _make_provider_patcher(provider),
+        # Make the REPL believe stdin is a TTY so it takes the prompt_toolkit branch.
+        patch("coda.cli.repl.sys") as mock_sys,
+        patch.object(PromptSession, "prompt_async", new=_fake_prompt_async),
+    ):
+        mock_sys.stdin.isatty.return_value = True
+        result = runner.invoke(app, ["--root", str(tmp_path), "--approval", "full_auto"])
+
+    assert result.exit_code == 0, result.output
+    assert provider.calls == 2, f"expected 2 LLM calls, got {provider.calls}"
+
+    # Multi-turn history: second turn must have seen both user messages.
+    second_users = [m for m in provider.messages_seen[1] if m.role == "user"]
+    assert any("ptk question one" in (m.content or "") for m in second_users)
+    assert any("ptk question two" in (m.content or "") for m in second_users)
+
+    assert "ptk answer one" in result.output
+    assert "ptk answer two" in result.output

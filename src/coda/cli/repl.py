@@ -1,13 +1,19 @@
-"""Coda interactive REPL — M4.9.
+"""Coda interactive REPL.
 
-The simplest possible multi-turn loop: read a line from stdin, hand it to
-the shared `AgentLoop`, print the result, repeat.  Conversation history
-survives across turns because the *same* `AgentLoop.context_manager` is
-reused (see [coda.core.loop.AgentLoop] docstring).
+Multi-turn loop: read a line from stdin, hand it to the shared `AgentLoop`,
+print the result, repeat.  Conversation history survives across turns because
+the *same* `AgentLoop.context_manager` is reused (see
+[coda.core.loop.AgentLoop] docstring).
 
-This is the `input()`-based REPL called out by M1 plan §1; the
-`prompt_toolkit` upgrade (arrow-key history, multi-line input, slash
-commands) is deliberately deferred to M6.
+On a real TTY the input is handled by **prompt_toolkit**, which provides:
+  - Left / right arrow key cursor movement
+  - Correct backspace / delete including CJK double-width characters
+  - Up / down arrow recall of prompts entered in the current session
+
+On non-TTY stdin (CI, pipes, Typer's CliRunner in tests) the implementation
+falls back to plain ``input()`` so scripted input still works.
+
+Multi-line input and slash commands remain future work.
 
 Exit conditions:
     - typing one of: ``exit`` / ``quit`` / ``:q`` / ``\\q``
@@ -24,6 +30,7 @@ the REPL feels conversational rather than transactional.
 from __future__ import annotations
 
 import asyncio
+import sys
 from typing import TYPE_CHECKING
 
 from rich.console import Console
@@ -45,10 +52,17 @@ async def run_repl(components: SessionComponents) -> None:
       - the `GitCheckpointManager` accumulates checkpoints,
       - `session_id` stays stable for the whole REPL lifetime.
     """
+    from prompt_toolkit import PromptSession  # noqa: PLC0415
+    from prompt_toolkit.history import InMemoryHistory  # noqa: PLC0415
+
     _console.print(
         "[dim]REPL mode. Type a prompt, 'exit' / Ctrl-D to quit. "
         "Press Ctrl-C twice to force exit.[/dim]\n"
     )
+
+    # One PromptSession for the whole REPL so up/down history recall works
+    # across turns.  Only used when stdin is a real TTY.
+    pt_session: PromptSession[str] = PromptSession(history=InMemoryHistory())
 
     turn_idx = 0
     last_ctrl_c = False
@@ -58,10 +72,13 @@ async def run_repl(components: SessionComponents) -> None:
         # Read one line from the user.
         # ----------------------------------------------------------------
         try:
-            # `input()` blocks the event loop, so run it in a worker thread.
-            # This keeps asyncio happy and (more importantly) lets a Ctrl-C
-            # delivered during a long turn propagate cleanly via cancellation.
-            user_input = await asyncio.to_thread(input, "you> ")
+            if sys.stdin.isatty():
+                # prompt_toolkit: proper cursor movement, backspace/delete,
+                # CJK double-width character handling, and in-session history.
+                user_input = await pt_session.prompt_async("you> ")
+            else:
+                # Non-TTY (tests, pipes): plain input() so scripted stdin works.
+                user_input = await asyncio.to_thread(input, "you> ")
         except EOFError:
             _console.print("\n[dim]bye.[/dim]")
             break
