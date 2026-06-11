@@ -32,7 +32,7 @@ For full design rationale, see [`docs/architecture.md`](docs/architecture.md).
 
 ## Quick start
 
-### Try the M5 release (Phase 1 complete)
+### Try the M6 release (Phase 1 feature-complete)
 
 ```bash
 git clone https://github.com/<org>/coda
@@ -52,12 +52,34 @@ uv run coda --root /tmp/coda-sandbox
 # (assistant works, then…)
 # you> now add a sound effect when collecting coins
 # you> exit          # or Ctrl-D / Ctrl-C twice
+
+# Pipe (M6): stdin becomes the prompt…
+echo "create hello.py that prints Hello Coda" | uv run coda --root /tmp/coda-sandbox
+
+# …or extra context when a prompt is given
+git diff | uv run coda "review this change for bugs"
 ```
+
+Assistant text **streams token-by-token** (M6.1), and every session summary ends with a
+cost line like `tokens     : 12.3k in / 4.1k out | cost $0.0231` (M6.2).
 
 In REPL mode the conversation history (including everything the agent did
 in the previous turn) is carried over, so follow-ups like "now add X" or
 "fix the bug from before" work naturally.  Exit with `exit` / `quit` /
 `:q`, Ctrl-D, or two consecutive Ctrl-C presses at the prompt.
+
+### REPL slash commands (M6)
+
+Slash commands are handled locally — they are never sent to the LLM:
+
+| Command | Action |
+|:--------|:-------|
+| `:help` | List available commands |
+| `:sessions` | Show the 10 most recent sessions in this workspace |
+| `:undo` | Restore files to the previous checkpoint |
+| `:cost` | Show session token / cost totals |
+| `:resume <id>` | Switch to another session (history is replayed) |
+| `:q` | Quit (same as `exit`) |
 
 ### Resuming a previous session (M5)
 

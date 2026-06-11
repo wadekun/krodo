@@ -318,6 +318,40 @@ Precedence chain: **CLI flag > env var > workspace YAML > user TOML > built-in d
 
 `coda doctor` now shows a **Config sources** section listing which files were found and which keys they contribute.
 
+## M6: streaming, cost, stdin, slash commands, approval persistence
+
+### Streaming output (`src/coda/llm/streaming.py`, M6.1)
+
+`ChunkAccumulator` reassembles `LLMChunk`s into a complete assistant `Message`: text deltas are concatenated, tool-call fragments are merged by index (the `arguments` JSON string arrives split across chunks and is `json.loads`-ed at the end, falling back to `{"_raw": ...}` on malformed JSON so the BAD_JSON recovery path still triggers), and the final `usage` / `finish_reason` are captured.
+
+`AgentLoop._call_llm` streams when **both** `LoopConfig.stream` (default True) and the provider's `supports_streaming` attribute are truthy; otherwise it falls back to non-streaming `chat()`. Test mocks don't set the attribute, so they transparently use `chat()` — zero test churn. Text deltas go through the constructor-injected `on_delta` callback (default: Rich raw print, no markup). `TurnResult.streamed` tells `_echo_turn_result` not to print `final_text` a second time.
+
+### Cost tracking (`src/coda/obs/cost.py`, M6.2 — engineering rule #4)
+
+- `Message.usage` (`{prompt_tokens, completion_tokens, total_tokens}`) and `Message.cost_usd` are filled by `LiteLLMProvider.chat()` via `response.usage` + `litellm.completion_cost`; the streaming path gets usage from the final chunk and the loop estimates cost with `litellm.cost_per_token`. Unknown models: tokens tracked, cost `None`.
+- `CostTracker` accumulates per-session totals; `AgentLoop` emits one `COST_SNAPSHOT` event per turn with `{turn_*, total_*}` token/cost fields.
+- Both session summaries print `tokens     : 12.3k in / 4.1k out | cost $0.0231` (cost omitted when unknown). Replay skips `COST_SNAPSHOT`.
+
+### Pipe stdin entry (M6.3)
+
+`echo "fix the bug" | coda` runs headless with the piped text as the prompt. `git diff | coda "review this"` appends stdin as a `<stdin>...</stdin>` context block after the prompt. Empty piped stdin (CliRunner test streams) keeps the REPL behaviour — this completes task 1.10's three-entry acceptance (REPL / exec / pipe).
+
+### REPL slash commands (M6.4)
+
+Handled locally in `repl.py:_dispatch_slash` — the LLM never sees them. Checked after the exit-token test, so `:q` still exits.
+
+| Command | Action |
+|---------|--------|
+| `:help` | list commands |
+| `:sessions` | recent-sessions table (shared `render_sessions_table` with `resume --list`) |
+| `:undo` | `undo_command(...)` with `typer.Exit` caught so the REPL survives |
+| `:cost` | CostTracker totals |
+| `:resume <id>` | switch session: `run_repl` returns the target id; `repl_session_cycle` (resume.py) rebuilds components, replays history, re-enters |
+
+### Approval trust persistence (M6.5)
+
+`TerminalApprovalManager.export_state()/restore_state()` snapshot `_session_trusted` + `_pattern_trust`. When a decision is `approve_session`/`approve_pattern`, the `APPROVAL_DECISION` event carries the full `state` snapshot (last one wins). `replay_events(events, ctx, approval=...)` re-applies the latest snapshot on resume, so `a`/`p` answers survive `coda resume`. Cross-session global policy stays Phase 3 (`policy.toml`).
+
 ## When you (the agent) modify this codebase
 
 - Always `read_file` before `edit_file` — never guess file contents.

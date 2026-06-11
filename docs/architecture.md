@@ -1003,8 +1003,8 @@ coda/
 - **1.6 审批 + 沙箱** — 产出：`coda/sandbox` 路径围栏 + 危险命令黑名单 + 三档审批 ｜ 验收：CI 包含 path traversal、symlink escape、危险命令注入的安全测试。
 - **1.7 `.codaignore` + Git checkpoint** — 产出：`.codaignore` 加载与匹配；每次写操作前自动 checkpoint ｜ 验收：`coda undo` 能回退到上一 checkpoint。
 - **1.8 持久化与记忆** — 产出：JSONL event-sourcing session（`SessionStore` Protocol + `JsonlSessionStore` 实现，SQLite 后端 Phase 2 再加）+ `AGENTS.md` 加载（项目+用户层）｜ 验收：`coda resume <id>` 完整恢复对话。
-- **1.9 可观测性** — 产出：structlog JSONL 日志 + cost log + secret redactor ｜ 验收：每个 tool call 有 trace 行；日志中无任何 API key 字面量。
-- **1.10 CLI** — 产出：Typer 入口 + REPL（prompt_toolkit）+ `coda exec` headless + Rich 流式 / diff 渲染 ｜ 验收：三种入口（REPL / `exec` / pipe stdin）皆可用。
+- **1.9 可观测性** — 产出：structlog JSONL 日志 + cost log + secret redactor ｜ 验收：每个 tool call 有 trace 行；日志中无任何 API key 字面量。✅ **M6 交付**：`CostTracker`（`coda/obs/cost.py`）每次 LLM 调用记录 tokens + cost，每 turn 落 `COST_SNAPSHOT` 事件，summary 显示 tokens/cost 行。
+- **1.10 CLI** — 产出：Typer 入口 + REPL（prompt_toolkit）+ `coda exec` headless + Rich 流式 / diff 渲染 ｜ 验收：三种入口（REPL / `exec` / pipe stdin）皆可用。✅ **M6 交付**：三入口齐备（REPL / `coda "task"` headless / `echo task | coda` pipe），流式输出（M6.1）+ REPL slash 命令（M6.4）落地。
 - **1.11 文档与发布** — 产出：README、QUICKSTART、ARCHITECTURE（本文）、CONTRIBUTING、SECURITY、CHANGELOG ｜ 验收：发布 v0.1 到 PyPI + GitHub Release，`pipx install coda` 可用。
 
 **退出标准**：用 v0.1 给本项目自己提一个真实 PR 并合入。
@@ -1082,6 +1082,14 @@ coda/
 ---
 
 ## 10. 变更日志
+
+- 2026-06-11 v0.7（M6，Phase 1 功能收口）：流式输出 + cost tracking + pipe stdin 入口 + REPL slash 命令 + 审批规则持久化。主要变更：
+  - M6.1 流式输出：新增 `coda/llm/streaming.py`（`ChunkAccumulator` 按 index 重组 tool-call 分片、捕获最终 usage/finish_reason）；`AgentLoop._call_llm` 在 provider 标记 `supports_streaming` 时走 `stream_chat`（`on_delta` 回调逐 token 渲染），否则回退 `chat()`（mock 零改动）；`TurnResult.streamed` 防双重打印。
+  - M6.2 cost tracking（落实工程规则 #4）：`Message.usage`/`cost_usd` 由 provider 填充（`litellm.completion_cost`，未知模型 cost=None）；`CostTracker`（`coda/obs/cost.py`）累计会话总量；每 turn 落 `COST_SNAPSHOT` 事件；summary 显示 `tokens : Xk in / Yk out | cost $Z`。
+  - M6.3 pipe 入口：`echo task | coda` headless 执行；`git diff | coda "review"` 把 stdin 作为 `<stdin>` 上下文块附加；空 stdin 保持 REPL。task 1.10 三入口验收达成。
+  - M6.4 REPL slash 命令：`:help` / `:sessions` / `:undo` / `:cost` / `:resume <id>`，本地处理不进 LLM；`:resume` 通过 `run_repl` 返回 sentinel + `repl_session_cycle` 重建组件并重放历史实现会话切换。
+  - M6.5 审批持久化：`TerminalApprovalManager.export_state/restore_state`；`approve_session`/`approve_pattern` 决策时 `APPROVAL_DECISION` 事件携带信任快照（last-wins）；`replay_events` 可选接收 approval manager 并在 resume 时恢复，`a`/`p` 信任跨 resume 生效。跨 session 全局策略仍归 Phase 3 `policy.toml`。
+  - Phase 1 剩余：仅 M7（任务 1.11 文档与发布）。
 
 - 2026-05-27 v0.6（M5）：`SessionStore` Protocol + `JsonlSessionStore` 实现落地。SQLite 后端推迟到 Phase 2（YAGNI：JSONL 零依赖、人可读、`coda undo` 零回归）。目录拆分：`.coda/logs/` 原来的混合文件拆为 `.coda/sessions/<id>.jsonl`（纯 JSONL session 事件流，首行为 `SESSION_INIT` header）+ `.coda/logs/<id>.log`（structlog 应用日志，`FileHandler` formatter 修为 `%(message)s` 产出纯 JSON 行）。`SessionEventLogger` 新增 `from_store` 工厂，跨进程 `seq` 续接 bug 修复（bootstrap from `store.max_seq + 1`）。M5.2 新增 `coda resume`；M5.3 新增 AGENTS.md 三层合并注入；M5.4 新增 config 文件加载。
 
