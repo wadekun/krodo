@@ -4,14 +4,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
-
-import pytest
 
 from coda.core.context import InMemoryContextManager
-from coda.core.types import Message, SessionEvent, SessionEventType
-from coda.memory.replay import ReplayStats, replay_events
-
+from coda.core.types import SessionEvent, SessionEventType
+from coda.memory.replay import replay_events
 
 # ---------------------------------------------------------------------------
 # Helpers

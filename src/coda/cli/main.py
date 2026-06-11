@@ -586,7 +586,8 @@ def _echo_turn_result(result: TurnResult) -> None:
     elif result.aborted_by_user:
         reason_str = ABORT_REASONS.get(result.abort_reason, result.abort_reason)
         typer.echo(f"⚠  Task halted: {reason_str}", err=True)
-    else:
+    elif not result.streamed:
+        # When streamed, the loop already rendered final_text live.
         typer.echo(result.final_text)
 
 

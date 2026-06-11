@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -12,9 +11,8 @@ import pytest
 from typer.testing import CliRunner
 
 from coda.cli.main import app
-from coda.core.types import LLMChunk, Message, ToolCall, ToolDef
+from coda.core.types import LLMChunk, Message, ToolDef
 from coda.memory.store import JsonlSessionStore
-
 
 # ---------------------------------------------------------------------------
 # Helpers (mirrors test_cli_e2e.py)
@@ -128,7 +126,6 @@ def test_resume_continues_conversation(tmp_path: Path) -> None:
 
 def test_resume_with_explicit_id(tmp_path: Path) -> None:
     """Two sessions exist; resume the older one by explicit ID."""
-    from coda.memory.store import JsonlSessionStore  # noqa: PLC0415
 
     store = JsonlSessionStore(tmp_path / ".coda" / "sessions")
     store.create_session("session-aaa", model="test", agents_md_hash=None, initial_prompt_hash=None)
@@ -145,7 +142,6 @@ def test_resume_with_explicit_id(tmp_path: Path) -> None:
 
 def test_resolve_session_id_prefix_match(tmp_path: Path) -> None:
     """Prefix match resolves to full ID when unambiguous."""
-    from coda.memory.store import JsonlSessionStore  # noqa: PLC0415
 
     store = JsonlSessionStore(tmp_path / ".coda" / "sessions")
     store.create_session("abcdef12", model="test", agents_md_hash=None, initial_prompt_hash=None)
@@ -158,7 +154,6 @@ def test_resolve_session_id_prefix_match(tmp_path: Path) -> None:
 
 def test_resolve_session_id_none_returns_most_recent(tmp_path: Path) -> None:
     """No session_id → returns most recent."""
-    from coda.memory.store import JsonlSessionStore  # noqa: PLC0415
 
     store = JsonlSessionStore(tmp_path / ".coda" / "sessions")
     store.create_session("session-old", model="test", agents_md_hash=None, initial_prompt_hash=None)
@@ -180,17 +175,16 @@ def test_resolve_session_id_none_returns_most_recent(tmp_path: Path) -> None:
 
 def test_resume_list_flag_prints_recent(tmp_path: Path) -> None:
     """coda resume --list prints recent sessions without starting REPL."""
-    from coda.memory.store import JsonlSessionStore  # noqa: PLC0415
 
     store = JsonlSessionStore(tmp_path / ".coda" / "sessions")
     for sid in ["s1", "s2", "s3"]:
         store.create_session(sid, model="test-model", agents_md_hash=None, initial_prompt_hash=None)
 
     # Use resume_command directly (simpler than routing through CliRunner subcommand)
-    from coda.cli.resume import resume_command  # noqa: PLC0415
+
     import typer  # noqa: PLC0415
-    from io import StringIO  # noqa: PLC0415
-    import sys  # noqa: PLC0415
+
+    from coda.cli.resume import resume_command  # noqa: PLC0415
 
     with pytest.raises(typer.Exit) as exc_info:
         resume_command(
@@ -203,8 +197,9 @@ def test_resume_list_flag_prints_recent(tmp_path: Path) -> None:
 
 def test_resume_list_empty_workspace(tmp_path: Path) -> None:
     """--list with no sessions prints a helpful message and exits 0."""
-    from coda.cli.resume import resume_command  # noqa: PLC0415
     import typer  # noqa: PLC0415
+
+    from coda.cli.resume import resume_command  # noqa: PLC0415
 
     with pytest.raises(typer.Exit) as exc_info:
         resume_command(
@@ -217,9 +212,9 @@ def test_resume_list_empty_workspace(tmp_path: Path) -> None:
 
 def test_resume_unknown_session_exits_1(tmp_path: Path) -> None:
     """Requesting a non-existent session ID exits with code 1."""
-    from coda.cli.resume import resume_command  # noqa: PLC0415
-
     import typer  # noqa: PLC0415
+
+    from coda.cli.resume import resume_command  # noqa: PLC0415
 
     with pytest.raises(typer.Exit) as exc_info:
         resume_command(

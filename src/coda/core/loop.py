@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -41,9 +42,11 @@ from coda.core.types import (
     Message,
     SessionEventType,
     ToolCall,
+    ToolDef,
     ToolResult,
 )
 from coda.llm.protocols import LLMProvider
+from coda.llm.streaming import ChunkAccumulator
 from coda.sandbox.protocols import ApprovalManager
 from coda.tools.protocols import ToolContext
 from coda.tools.registry import ToolRegistry
@@ -52,6 +55,11 @@ _console = Console(stderr=False)
 
 _DEFAULT_MAX_TOOL_CALLS = 15
 _logger = logging.getLogger(__name__)
+
+
+def _default_on_delta(text: str) -> None:
+    """Default streaming sink: write raw text without markup interpretation."""
+    _console.print(text, end="", markup=False, highlight=False, soft_wrap=True)
 
 
 _DEFAULT_SYSTEM_PROMPT = (
@@ -96,6 +104,8 @@ def render_system_prompt(template: str, registry: ToolRegistry) -> str:
 class LoopConfig:
     max_tool_calls_per_turn: int = _DEFAULT_MAX_TOOL_CALLS
     system_prompt: str = _DEFAULT_SYSTEM_PROMPT
+    # Stream assistant text token-by-token when the provider supports it.
+    stream: bool = True
 
 
 AbortReason = Literal[
@@ -114,6 +124,9 @@ class TurnResult:
     aborted_by_user: bool = False
     hit_tool_call_limit: bool = False
     abort_reason: AbortReason = field(default="none")
+    # True when final_text was already rendered live via streaming deltas,
+    # so callers must not print it a second time.
+    streamed: bool = False
 
 
 class AgentLoop:
@@ -133,6 +146,7 @@ class AgentLoop:
         *,
         config: LoopConfig | None = None,
         event_logger: SessionEventLogger | None = None,
+        on_delta: Callable[[str], None] | None = None,
     ) -> None:
         self._provider = provider
         self._registry = registry
@@ -142,6 +156,7 @@ class AgentLoop:
         self._logger = tool_ctx.logger
         self._stall = StallDetector()
         self._event_logger = event_logger
+        self._on_delta = on_delta or _default_on_delta
         # Render the system prompt once at construction time so the model sees
         # the list of currently-registered tools without anyone having to
         # hand-update the prompt string when a tool is added/removed.
@@ -154,6 +169,55 @@ class AgentLoop:
         """Emit a SessionEvent if an event_logger is configured."""
         if self._event_logger is not None:
             self._event_logger.emit(event_type, data=dict(data))
+
+    async def _call_llm(
+        self,
+        messages: list[Message],
+        tool_defs: list[ToolDef],
+    ) -> tuple[Message, bool]:
+        """One LLM call — streaming when enabled and supported.
+
+        Returns ``(response, streamed)`` where *streamed* is True when text
+        deltas were already rendered live via the ``on_delta`` callback.
+        Providers without a truthy ``supports_streaming`` attribute (all test
+        mocks) silently use the non-streaming ``chat()`` path, as do providers
+        whose ``stream_chat`` raises ``NotImplementedError``.
+        """
+        if self._config.stream and getattr(self._provider, "supports_streaming", False):
+            try:
+                return await self._stream_llm(messages, tool_defs)
+            except (NotImplementedError, TypeError):
+                # stream_chat unsupported (mocks / wrapped providers) — fall
+                # back to the non-streaming path below.
+                pass
+
+        response = await self._provider.chat(messages=messages, tools=tool_defs)
+        return response, False
+
+    async def _stream_llm(
+        self,
+        messages: list[Message],
+        tool_defs: list[ToolDef],
+    ) -> tuple[Message, bool]:
+        """Drive one streaming LLM call, rendering text deltas via on_delta."""
+        import inspect  # noqa: PLC0415
+
+        stream = self._provider.stream_chat(messages=messages, tools=tool_defs)
+        # Tolerate `async def stream_chat(...)` implementations that return
+        # the iterator from a coroutine (or raise NotImplementedError there).
+        if inspect.iscoroutine(stream):
+            stream = await stream
+
+        accumulator = ChunkAccumulator()
+        streamed_text = False
+        async for chunk in stream:
+            if chunk.delta_text:
+                self._on_delta(chunk.delta_text)
+                streamed_text = True
+            accumulator.add(chunk)
+        if streamed_text:
+            self._on_delta("\n")
+        return accumulator.to_message(), streamed_text
 
     async def run(self, user_input: str) -> TurnResult:  # noqa: C901
         """Execute one full agent turn for *user_input*."""
@@ -168,6 +232,8 @@ class AgentLoop:
         hit_limit = False
         aborted = False
         abort_reason: AbortReason = "none"
+        last_streamed = False
+        final_streamed = False
 
         # Retry counters — persisted across while iterations so exhaustion works.
         provider_retry = 0
@@ -188,10 +254,7 @@ class AgentLoop:
             # LLM call with provider-error recovery
             # ----------------------------------------------------------------
             try:
-                response: Message = await self._provider.chat(
-                    messages=messages,
-                    tools=tool_defs,
-                )
+                response, last_streamed = await self._call_llm(messages, tool_defs)
                 provider_retry = 0  # reset on success
                 self._logger.info(
                     "llm_response stop_reason=%r tool_calls=%d content_len=%d",
@@ -243,10 +306,12 @@ class AgentLoop:
             # ----------------------------------------------------------------
             # Print any reasoning/commentary text the model sent alongside
             # its tool calls so users can see what the agent is thinking.
+            # Skipped when the text was already rendered live by streaming.
             # (When there are no tool_calls the text goes via final_text path.)
             # ----------------------------------------------------------------
             if (
-                response.tool_calls
+                not last_streamed
+                and response.tool_calls
                 and isinstance(response.content, str)
                 and response.content.strip()
             ):
@@ -285,6 +350,7 @@ class AgentLoop:
             if not response.tool_calls:
                 # Model produced a final answer — store and return
                 final_text = response.content if isinstance(response.content, str) else ""
+                final_streamed = last_streamed
                 self.context_manager.append_assistant(response)
                 self._emit(SessionEventType.ASSISTANT_MESSAGE, content=final_text)
                 break
@@ -475,4 +541,5 @@ class AgentLoop:
             aborted_by_user=aborted,
             hit_tool_call_limit=hit_limit,
             abort_reason=abort_reason,
+            streamed=final_streamed,
         )

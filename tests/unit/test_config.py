@@ -9,7 +9,6 @@ import pytest
 
 from coda.core.config import CodaConfig, load_config
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -124,7 +123,9 @@ class TestMissingFiles:
 
 
 class TestSchemaError:
-    def test_schema_error_warns_not_raises(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    def test_schema_error_warns_not_raises(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Invalid YAML value logs a warning and returns empty config."""
         # approval must be one of the ApprovalMode literals
         _write_yaml(tmp_path / ".coda" / "config.yaml", "approval: invalid_value\n")

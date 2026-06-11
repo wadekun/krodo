@@ -124,6 +124,9 @@ class LiteLLMProvider:
     """
 
     name = "litellm"
+    # Capability flag checked by AgentLoop: providers without this attribute
+    # (e.g. test mocks) transparently fall back to non-streaming chat().
+    supports_streaming = True
 
     def __init__(
         self,

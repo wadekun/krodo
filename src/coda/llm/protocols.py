@@ -18,6 +18,14 @@ if TYPE_CHECKING:
 
 @runtime_checkable
 class LLMProvider(Protocol):
+    """Provider abstraction.
+
+    Optional capability attribute (NOT part of the Protocol so test mocks
+    stay minimal): ``supports_streaming: bool``.  AgentLoop streams only when
+    ``getattr(provider, "supports_streaming", False)`` is truthy; otherwise it
+    uses non-streaming ``chat()``.
+    """
+
     name: str
     model: str
 

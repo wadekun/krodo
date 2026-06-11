@@ -3,18 +3,13 @@
 from __future__ import annotations
 
 import json
-import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
-
-import pytest
 
 from coda.core.events import SessionEventLogger
-from coda.core.types import SessionEvent, SessionEventType
-from coda.memory.store import JsonlSessionStore, SessionRow
-
+from coda.core.types import SessionEventType
+from coda.memory.store import JsonlSessionStore
 
 # ---------------------------------------------------------------------------
 # Helpers

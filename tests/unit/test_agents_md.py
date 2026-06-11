@@ -5,16 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from coda.core.workspace import LocalWorkspaceResolver
 from coda.memory.agents_md import (
     AgentsMdBundle,
-    _PER_FILE_LIMIT_TOKENS,
-    _TOTAL_LIMIT_TOKENS,
     load_agents_md,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
