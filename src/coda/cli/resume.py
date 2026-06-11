@@ -18,6 +18,7 @@ available and override the model used in the original session.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -28,7 +29,7 @@ from coda.memory.replay import replay_events
 from coda.memory.store import JsonlSessionStore
 
 if TYPE_CHECKING:
-    pass
+    from coda.cli.main import SessionComponents
 
 _DEFAULT_MODEL = "anthropic/claude-3-5-sonnet-20241022"
 
@@ -48,7 +49,6 @@ def resume_command(
 ) -> None:
     """Resume or list sessions for the current workspace."""
     from rich.console import Console  # noqa: PLC0415
-    from rich.table import Table  # noqa: PLC0415
 
     console = Console()
 
@@ -71,16 +71,7 @@ def resume_command(
             console.print("[dim]No sessions found in this workspace.[/dim]")
             raise typer.Exit(code=0)
 
-        table = Table(title="Recent sessions", show_lines=False)
-        table.add_column("ID", style="cyan", no_wrap=True)
-        table.add_column("Created", style="green")
-        table.add_column("Last updated", style="green")
-        table.add_column("Model", style="dim")
-        for row in rows:
-            created = row.created_at.strftime("%Y-%m-%d %H:%M")
-            updated = row.last_updated_at.strftime("%Y-%m-%d %H:%M")
-            table.add_row(row.session_id, created, updated, row.model or "—")
-        console.print(table)
+        console.print(render_sessions_table(rows))
         raise typer.Exit(code=0)
 
     # Resolve session ID (exact match or prefix match)
@@ -97,41 +88,23 @@ def resume_command(
             )
         raise typer.Exit(code=1)
 
-    # Load events and build components with resumed session ID
-    events = store.load_events(resolved_id)
-
     async def _entry() -> None:
         from coda.cli.main import _build_session_components  # noqa: PLC0415
-        from coda.cli.repl import run_repl  # noqa: PLC0415
 
-        components = _build_session_components(
-            root=root,
-            model=model,
-            api_key=api_key,
-            api_base=api_base,
-            approval_mode=approval,
-            max_tool_calls=max_tool_calls,
-            max_tokens=max_tokens,
-            resume_session_id=resolved_id,
-        )
-
-        # Replay the stored events into the context manager
-        stats = replay_events(events, components.loop.context_manager)
-        if stats.messages_restored > 0:
-            from rich.console import Console as _RichConsole  # noqa: N814, PLC0415
-
-            note = "[yellow](compressed)[/yellow] " if stats.compressed else ""
-            _RichConsole(stderr=True).print(
-                f"[dim]Replayed {stats.messages_restored} messages, "
-                f"{stats.turns} user turn(s). {note}Starting REPL…[/dim]"
+        def _rebuild(target_id: str) -> SessionComponents:
+            return _build_session_components(
+                root=root,
+                model=model,
+                api_key=api_key,
+                api_base=api_base,
+                approval_mode=approval,
+                max_tool_calls=max_tool_calls,
+                max_tokens=max_tokens,
+                resume_session_id=target_id,
             )
 
-            _print_conversation_history(
-                components.loop.context_manager.history,
-                workspace_root,
-            )
-
-        await run_repl(components)
+        components = build_resumed_components(resolved_id, _rebuild)
+        await repl_session_cycle(components, _rebuild)
 
     asyncio.run(_entry())
 
@@ -139,6 +112,69 @@ def resume_command(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def render_sessions_table(rows: list) -> object:
+    """Build the Rich table of recent sessions (shared with the REPL ``:sessions``)."""
+    from rich.table import Table  # noqa: PLC0415
+
+    table = Table(title="Recent sessions", show_lines=False)
+    table.add_column("ID", style="cyan", no_wrap=True)
+    table.add_column("Created", style="green")
+    table.add_column("Last updated", style="green")
+    table.add_column("Model", style="dim")
+    for row in rows:
+        created = row.created_at.strftime("%Y-%m-%d %H:%M")
+        updated = row.last_updated_at.strftime("%Y-%m-%d %H:%M")
+        table.add_row(row.session_id, created, updated, row.model or "—")
+    return table
+
+
+def build_resumed_components(
+    session_id: str,
+    rebuild: Callable[[str], SessionComponents],
+) -> SessionComponents:
+    """Build components for *session_id* and replay its event history."""
+    components = rebuild(session_id)
+    events = components.store.load_events(session_id)
+
+    stats = replay_events(events, components.loop.context_manager)
+    if stats.messages_restored > 0:
+        from rich.console import Console as _RichConsole  # noqa: N814, PLC0415
+
+        note = "[yellow](compressed)[/yellow] " if stats.compressed else ""
+        _RichConsole(stderr=True).print(
+            f"[dim]Replayed {stats.messages_restored} messages, "
+            f"{stats.turns} user turn(s). {note}Starting REPL…[/dim]"
+        )
+
+        _print_conversation_history(
+            components.loop.context_manager.history,
+            components.workspace.root,
+        )
+
+    return components
+
+
+async def repl_session_cycle(
+    components: SessionComponents,
+    rebuild: Callable[[str], SessionComponents],
+) -> None:
+    """Run the REPL, rebuilding components whenever ``:resume`` switches session.
+
+    ``run_repl`` returns the target session id when the user issued
+    ``:resume <id>`` (or None on normal exit).  Each switch rebuilds the
+    full component bundle for the target session and replays its history,
+    so the conversation continues exactly where that session left off.
+    """
+    from coda.cli.repl import run_repl  # noqa: PLC0415
+
+    current = components
+    while True:
+        target = await run_repl(current)
+        if target is None:
+            return
+        current = build_resumed_components(target, rebuild)
 
 
 def _print_conversation_history(

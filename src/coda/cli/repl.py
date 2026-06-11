@@ -13,7 +13,14 @@ On a real TTY the input is handled by **prompt_toolkit**, which provides:
 On non-TTY stdin (CI, pipes, Typer's CliRunner in tests) the implementation
 falls back to plain ``input()`` so scripted input still works.
 
-Multi-line input and slash commands remain future work.
+Slash commands (M6.4) — handled locally, never sent to the LLM:
+    :help                 list available commands
+    :sessions             list recent sessions in this workspace
+    :undo                 restore files to the previous checkpoint
+    :cost                 show session token/cost totals
+    :resume <id>          switch to another session (history is replayed)
+
+Multi-line input remains future work.
 
 Exit conditions:
     - typing one of: ``exit`` / ``quit`` / ``:q`` / ``\\q``
@@ -43,7 +50,7 @@ _EXIT_TOKENS = {"exit", "quit", ":q", "\\q"}
 _console = Console()
 
 
-async def run_repl(components: SessionComponents) -> None:
+async def run_repl(components: SessionComponents) -> str | None:
     """Drive the interactive multi-turn loop until the user exits.
 
     `components` is shared across every turn so that:
@@ -51,6 +58,9 @@ async def run_repl(components: SessionComponents) -> None:
       - the `SessionEventLogger` keeps appending to one JSONL file,
       - the `GitCheckpointManager` accumulates checkpoints,
       - `session_id` stays stable for the whole REPL lifetime.
+
+    Returns the target session id when the user issued ``:resume <id>``
+    (the caller rebuilds components and re-enters), or None on normal exit.
     """
     from prompt_toolkit import PromptSession  # noqa: PLC0415
     from prompt_toolkit.history import InMemoryHistory  # noqa: PLC0415
@@ -66,6 +76,7 @@ async def run_repl(components: SessionComponents) -> None:
 
     turn_idx = 0
     last_ctrl_c = False
+    switch_target: str | None = None
 
     while True:
         # ----------------------------------------------------------------
@@ -99,6 +110,14 @@ async def run_repl(components: SessionComponents) -> None:
         if stripped.lower() in _EXIT_TOKENS:
             break
 
+        # M6.4: slash commands are handled locally — the LLM never sees them.
+        # (Checked after exit tokens so ':q' keeps working as an exit.)
+        if stripped.startswith(":"):
+            switch_target = _dispatch_slash(stripped, components)
+            if switch_target is not None:
+                break
+            continue
+
         # ----------------------------------------------------------------
         # Run one agent turn.  Ctrl-C inside the turn cancels just this
         # turn (we catch it and continue, instead of letting it tear down
@@ -123,6 +142,20 @@ async def run_repl(components: SessionComponents) -> None:
         _echo_turn_result(result)
 
     # ------------------------------------------------------------------
+    # Session switch (`:resume <id>`): hand the target back to the caller,
+    # which rebuilds components and re-enters run_repl.  No summary here —
+    # the conversation continues in the resumed session.
+    # ------------------------------------------------------------------
+    if switch_target is not None:
+        _console.print(f"[dim]Switching to session {switch_target}…[/dim]")
+        components.logger.info(
+            "repl_switch_session from=%s to=%s",
+            components.session_id,
+            switch_target,
+        )
+        return switch_target
+
+    # ------------------------------------------------------------------
     # Goodbye: print one consolidated session summary.
     # ------------------------------------------------------------------
     from coda.cli.main import print_session_summary  # noqa: PLC0415
@@ -133,3 +166,99 @@ async def run_repl(components: SessionComponents) -> None:
         components.session_id,
         turn_idx,
     )
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Slash command dispatch (M6.4)
+# ---------------------------------------------------------------------------
+
+_SLASH_HELP = """\
+[bold]REPL commands[/bold]
+  :help            show this help
+  :sessions        list recent sessions in this workspace
+  :undo            restore files to the previous checkpoint
+  :cost            show session token / cost totals
+  :resume <id>     switch to another session (full or prefix id)
+  :q / exit        quit the REPL"""
+
+
+def _dispatch_slash(command: str, components: SessionComponents) -> str | None:
+    """Execute one slash *command*.
+
+    Returns the resolved target session id for ``:resume <id>`` (the REPL
+    then breaks out so the caller can rebuild components), or None when the
+    REPL should keep going.
+    """
+    parts = command.split()
+    cmd, args = parts[0].lower(), parts[1:]
+
+    if cmd == ":help":
+        _console.print(_SLASH_HELP)
+        return None
+
+    if cmd == ":sessions":
+        from coda.cli.resume import render_sessions_table  # noqa: PLC0415
+
+        rows = components.store.list_recent(limit=10)
+        if not rows:
+            _console.print("[dim]No sessions found in this workspace.[/dim]")
+        else:
+            _console.print(render_sessions_table(rows))
+        return None
+
+    if cmd == ":undo":
+        import typer  # noqa: PLC0415
+
+        from coda.cli.undo import undo_command  # noqa: PLC0415
+
+        try:
+            undo_command(
+                session=components.session_id,
+                _workspace_root=components.workspace.root,
+            )
+        except typer.Exit:
+            # undo prints its own error/success message; the REPL survives.
+            pass
+        return None
+
+    if cmd == ":cost":
+        from coda.obs.cost import format_token_count  # noqa: PLC0415
+
+        tracker = components.cost_tracker
+        if tracker.total_tokens == 0:
+            _console.print("[dim]No token usage recorded in this session yet.[/dim]")
+            return None
+        line = (
+            f"tokens: {format_token_count(tracker.prompt_tokens)} in / "
+            f"{format_token_count(tracker.completion_tokens)} out"
+        )
+        if tracker.cost_usd is not None:
+            line += f" | cost ${tracker.cost_usd:.4f}"
+        _console.print(line)
+        return None
+
+    if cmd == ":resume":
+        if not args:
+            _console.print("[yellow]Usage: :resume <session-id>[/yellow]")
+            return None
+
+        import typer  # noqa: PLC0415
+
+        from coda.cli.resume import _resolve_session_id  # noqa: PLC0415
+
+        try:
+            resolved = _resolve_session_id(components.store, args[0])  # type: ignore[arg-type]
+        except typer.Exit:
+            # Ambiguous prefix — the resolver already printed the matches.
+            return None
+        if resolved is None:
+            _console.print(f"[red]No session matching '{args[0]}' in this workspace.[/red]")
+            return None
+        if resolved == components.session_id:
+            _console.print("[dim]Already in this session.[/dim]")
+            return None
+        return resolved
+
+    _console.print(f"[yellow]Unknown command '{cmd}'. Type :help for available commands.[/yellow]")
+    return None

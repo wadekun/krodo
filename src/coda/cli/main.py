@@ -332,9 +332,22 @@ def main(
             await _run_headless(effective_prompt, components)
         else:
             # Import lazily to avoid cycles and keep startup fast.
-            from coda.cli.repl import run_repl  # noqa: PLC0415
+            from coda.cli.resume import repl_session_cycle  # noqa: PLC0415
 
-            await run_repl(components)
+            def _rebuild(target_id: str) -> SessionComponents:
+                return _build_session_components(
+                    root=root,
+                    model=model,
+                    api_key=api_key,
+                    api_base=api_base,
+                    approval_mode=approval,
+                    max_tool_calls=max_tool_calls,
+                    max_tokens=max_tokens,
+                    summary_window=summary_window,
+                    resume_session_id=target_id,
+                )
+
+            await repl_session_cycle(components, _rebuild)
 
     asyncio.run(_entry())
 
