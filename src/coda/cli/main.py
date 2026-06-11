@@ -306,6 +306,17 @@ def main(
 
     import asyncio  # noqa: PLC0415
 
+    # M6.3: pipe entry — `echo task | coda` runs headless; `git diff | coda
+    # "review"` appends piped stdin as a <stdin> context block.  Empty piped
+    # stdin (e.g. CliRunner test streams) keeps the REPL behaviour unchanged.
+    effective_prompt = prompt
+    piped = _read_piped_stdin()
+    if piped:
+        if prompt:
+            effective_prompt = f"{prompt}\n\n<stdin>\n{piped}\n</stdin>"
+        else:
+            effective_prompt = piped
+
     async def _entry() -> None:
         components = _build_session_components(
             root=root,
@@ -317,8 +328,8 @@ def main(
             max_tokens=max_tokens,
             summary_window=summary_window,
         )
-        if prompt:
-            await _run_headless(prompt, components)
+        if effective_prompt:
+            await _run_headless(effective_prompt, components)
         else:
             # Import lazily to avoid cycles and keep startup fast.
             from coda.cli.repl import run_repl  # noqa: PLC0415
@@ -326,6 +337,18 @@ def main(
             await run_repl(components)
 
     asyncio.run(_entry())
+
+
+def _read_piped_stdin() -> str:
+    """Return stripped piped stdin content, or '' when stdin is a TTY/empty."""
+    import sys  # noqa: PLC0415
+
+    try:
+        if sys.stdin is None or sys.stdin.isatty():
+            return ""
+        return sys.stdin.read().strip()
+    except (OSError, ValueError):
+        return ""
 
 
 # ---------------------------------------------------------------------------
