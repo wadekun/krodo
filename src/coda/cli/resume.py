@@ -138,7 +138,13 @@ def build_resumed_components(
     components = rebuild(session_id)
     events = components.store.load_events(session_id)
 
-    stats = replay_events(events, components.loop.context_manager)
+    # M6.5: pass the approval manager so persisted trust snapshots
+    # (`a` / `p` answers) are restored along with the conversation.
+    stats = replay_events(
+        events,
+        components.loop.context_manager,
+        approval=components.approval,
+    )
     if stats.messages_restored > 0:
         from rich.console import Console as _RichConsole  # noqa: N814, PLC0415
 

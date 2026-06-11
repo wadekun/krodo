@@ -10,7 +10,9 @@ Mapping table (see M5.2 spec):
   TOOL_RESULT       → ctx.append_tool_result(ToolResult(...))
   COMPRESSION       → replace preceding replayed messages with the summary block
   TOOL_CALL         → skip (already embedded in ASSISTANT_MESSAGE data)
-  CHECKPOINT / UNDO / APPROVAL_DECISION / ERROR / SESSION_INIT / COST_SNAPSHOT
+  APPROVAL_DECISION → re-apply the latest trust ``state`` snapshot to the
+                      approval manager when one is passed (M6.5)
+  CHECKPOINT / UNDO / ERROR / SESSION_INIT / COST_SNAPSHOT
                     → skip (metadata only)
 """
 
@@ -24,6 +26,7 @@ from coda.core.types import Message, SessionEventType, ToolResult
 if TYPE_CHECKING:
     from coda.core.context import InMemoryContextManager
     from coda.core.types import SessionEvent
+    from coda.sandbox.approval import TerminalApprovalManager
 
 
 # ---------------------------------------------------------------------------
@@ -48,12 +51,17 @@ class ReplayStats:
 def replay_events(
     events: list[SessionEvent],
     ctx: InMemoryContextManager,
+    approval: TerminalApprovalManager | None = None,
 ) -> ReplayStats:
     """Reconstruct *ctx._history* from *events*.
 
     Events are processed in ``seq`` order.  The context manager is mutated
     in place; existing history is left intact (allows pre-pending
     ``<project_memory>`` before calling replay).
+
+    When *approval* is provided, the latest ``APPROVAL_DECISION`` event
+    carrying a trust ``state`` snapshot is re-applied via
+    ``approval.restore_state(...)`` so session/pattern trust survives resume.
 
     Returns :class:`ReplayStats` with counts for banner display.
     """
@@ -65,6 +73,7 @@ def replay_events(
     turns = 0
     messages_restored = 0
     compressed = False
+    last_approval_state: dict | None = None
 
     for event in sorted_events:
         et = event.type
@@ -139,8 +148,17 @@ def replay_events(
                 messages_restored = 1  # reset: only the summary remains
                 compressed = True
 
-        # All other event types (TOOL_CALL, CHECKPOINT, UNDO, APPROVAL_DECISION,
-        # ERROR, COST_SNAPSHOT) are metadata-only — skip.
+        elif et == SessionEventType.APPROVAL_DECISION:
+            # Snapshot style: the last state wins (it is cumulative).
+            state = data.get("state")
+            if isinstance(state, dict):
+                last_approval_state = state
+
+        # All other event types (TOOL_CALL, CHECKPOINT, UNDO, ERROR,
+        # COST_SNAPSHOT) are metadata-only — skip.
+
+    if approval is not None and last_approval_state is not None:
+        approval.restore_state(last_approval_state)
 
     return ReplayStats(
         turns=turns,

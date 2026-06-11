@@ -119,6 +119,7 @@ class SessionComponents:
     log_path: Path        # <workspace>/.coda/logs/<id>.log — structlog application log
     max_tokens: int
     cost_tracker: CostTracker
+    approval: TerminalApprovalManager
 
 
 def _collect_written_paths(sessions_path: Path) -> list[str]:
@@ -605,6 +606,7 @@ def _build_session_components(
         log_path=log_path,
         max_tokens=max_tokens,
         cost_tracker=cost_tracker,
+        approval=approval_manager,
     )
 
 

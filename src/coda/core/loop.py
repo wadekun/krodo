@@ -476,11 +476,16 @@ class AgentLoop:
                         arguments=tc.arguments or {},
                     )
                 )
-                self._emit(
-                    SessionEventType.APPROVAL_DECISION,
-                    tool_name=tc.name,
-                    decision=decision,
-                )
+                approval_data: dict[str, object] = {
+                    "tool_name": tc.name,
+                    "decision": decision,
+                }
+                # M6.5: persist the trust snapshot so `a`/`p` survive resume.
+                if decision in ("approve_session", "approve_pattern"):
+                    export = getattr(self._approval, "export_state", None)
+                    if callable(export):
+                        approval_data["state"] = export()
+                self._emit(SessionEventType.APPROVAL_DECISION, **approval_data)
 
                 if decision == "deny":
                     aborted = True

@@ -138,6 +138,41 @@ class TerminalApprovalManager:
         self._pattern_trust.append(rule)
 
     # ------------------------------------------------------------------
+    # State persistence (M6.5)
+    # ------------------------------------------------------------------
+
+    def export_state(self) -> dict[str, Any]:
+        """Snapshot session-trust state for persistence in APPROVAL_DECISION events."""
+        return {
+            "trusted_tools": sorted(self._session_trusted),
+            "pattern_rules": [
+                {"tool_name": rule.tool_name, "arg_glob": rule.arg_glob}
+                for rule in self._pattern_trust
+            ],
+        }
+
+    def restore_state(self, state: dict[str, Any]) -> None:
+        """Re-apply a previously exported snapshot (used by ``coda resume``).
+
+        Additive and idempotent: existing trust is kept, duplicates skipped.
+        """
+        trusted = state.get("trusted_tools", [])
+        if isinstance(trusted, list):
+            self._session_trusted.update(str(t) for t in trusted if t)
+
+        rules = state.get("pattern_rules", [])
+        if isinstance(rules, list):
+            for raw in rules:
+                if not isinstance(raw, dict) or not raw.get("tool_name"):
+                    continue
+                rule = PatternRule(
+                    tool_name=str(raw["tool_name"]),
+                    arg_glob=str(raw.get("arg_glob", "*") or "*"),
+                )
+                if rule not in self._pattern_trust:
+                    self._pattern_trust.append(rule)
+
+    # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 
