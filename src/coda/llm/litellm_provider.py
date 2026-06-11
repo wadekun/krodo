@@ -156,7 +156,23 @@ class LiteLLMProvider:
         choice = response.choices[0]
         raw_finish = getattr(choice, "finish_reason", None)
         finish_reason: str | None = raw_finish if isinstance(raw_finish, str) else None
-        return _litellm_to_message(choice.message, stop_reason=finish_reason)
+        message = _litellm_to_message(choice.message, stop_reason=finish_reason)
+
+        # M6.2: attach token usage + USD cost so AgentLoop can track totals.
+        raw_usage = getattr(response, "usage", None)
+        if raw_usage:
+            message.usage = {
+                "prompt_tokens": int(getattr(raw_usage, "prompt_tokens", 0) or 0),
+                "completion_tokens": int(getattr(raw_usage, "completion_tokens", 0) or 0),
+                "total_tokens": int(getattr(raw_usage, "total_tokens", 0) or 0),
+            }
+            try:
+                message.cost_usd = float(litellm.completion_cost(completion_response=response))
+            except Exception:  # noqa: BLE001
+                # Unknown model pricing — tokens still tracked, cost omitted.
+                message.cost_usd = None
+
+        return message
 
     def stream_chat(
         self,

@@ -31,6 +31,9 @@ class Message(BaseModel):
     tool_call_id: str | None = None
     tool_calls: list[ToolCall] | None = None
     stop_reason: str | None = None
+    # M6.2: filled by the provider on assistant responses; ignored elsewhere.
+    usage: dict[str, int] | None = None
+    cost_usd: float | None = None
 
 
 class ToolResult(BaseModel):

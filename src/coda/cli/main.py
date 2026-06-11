@@ -43,6 +43,7 @@ from coda.core.workspace import LocalWorkspaceResolver, Workspace
 from coda.llm.litellm_provider import LiteLLMProvider
 from coda.memory.agents_md import load_agents_md
 from coda.memory.store import JsonlSessionStore, SessionStore
+from coda.obs.cost import CostTracker, format_token_count
 from coda.obs.logger import configure_logging, get_session_log_path
 from coda.sandbox.approval import TerminalApprovalManager
 from coda.sandbox.checkpoint import GitCheckpointManager
@@ -117,6 +118,7 @@ class SessionComponents:
     sessions_path: Path   # <workspace>/.coda/sessions/<id>.jsonl — event log
     log_path: Path        # <workspace>/.coda/logs/<id>.log — structlog application log
     max_tokens: int
+    cost_tracker: CostTracker
 
 
 def _collect_written_paths(sessions_path: Path) -> list[str]:
@@ -148,6 +150,20 @@ def _collect_written_paths(sessions_path: Path) -> list[str]:
     return paths
 
 
+def _cost_summary_line(components: SessionComponents) -> str | None:
+    """Render 'tokens     : 12.3k in / 4.1k out | cost $0.0231' (None if no usage)."""
+    tracker = components.cost_tracker
+    if tracker.total_tokens == 0:
+        return None
+    line = (
+        f"tokens     : {format_token_count(tracker.prompt_tokens)} in / "
+        f"{format_token_count(tracker.completion_tokens)} out"
+    )
+    if tracker.cost_usd is not None:
+        line += f" | cost ${tracker.cost_usd:.4f}"
+    return line
+
+
 def print_session_summary(components: SessionComponents, turns: int | None = None) -> None:
     """Print the standard '─── session summary ───' block to stderr.
 
@@ -161,6 +177,9 @@ def print_session_summary(components: SessionComponents, turns: int | None = Non
     typer.echo(f"workspace  : {components.workspace.root}", err=True)
     if turns is not None:
         typer.echo(f"turns      : {turns}", err=True)
+    cost_line = _cost_summary_line(components)
+    if cost_line:
+        typer.echo(cost_line, err=True)
     # tool_calls cannot be aggregated from TurnResult here (REPL has many turns);
     # the session JSONL is the source of truth for per-session totals.
     if written_paths:
@@ -495,6 +514,7 @@ def _build_session_components(
     )
 
     loop_config = LoopConfig(max_tool_calls_per_turn=max_tool_calls)
+    cost_tracker = CostTracker()
     loop = AgentLoop(
         provider=provider,
         registry=registry,
@@ -502,6 +522,7 @@ def _build_session_components(
         approval=approval_manager,
         config=loop_config,
         event_logger=event_logger,
+        cost_tracker=cost_tracker,
     )
 
     # Inject budget + compressor into context manager.
@@ -547,6 +568,7 @@ def _build_session_components(
         sessions_path=sessions_path,
         log_path=log_path,
         max_tokens=max_tokens,
+        cost_tracker=cost_tracker,
     )
 
 
@@ -598,6 +620,9 @@ def _print_headless_summary(components: SessionComponents, result: TurnResult) -
     typer.echo("─── session summary ───────────────────", err=True)
     typer.echo(f"workspace  : {components.workspace.root}", err=True)
     typer.echo(f"tool calls : {result.tool_calls_made}", err=True)
+    cost_line = _cost_summary_line(components)
+    if cost_line:
+        typer.echo(cost_line, err=True)
     if written_paths:
         typer.echo("files written:", err=True)
         for p in written_paths:

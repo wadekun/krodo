@@ -105,6 +105,7 @@ class ChunkAccumulator:
             content=self.text,
             tool_calls=tool_calls,
             stop_reason=self.finish_reason,
+            usage=self.usage,
         )
 
 

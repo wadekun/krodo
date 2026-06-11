@@ -47,6 +47,7 @@ from coda.core.types import (
 )
 from coda.llm.protocols import LLMProvider
 from coda.llm.streaming import ChunkAccumulator
+from coda.obs.cost import CostTracker, estimate_cost_usd
 from coda.sandbox.protocols import ApprovalManager
 from coda.tools.protocols import ToolContext
 from coda.tools.registry import ToolRegistry
@@ -127,6 +128,10 @@ class TurnResult:
     # True when final_text was already rendered live via streaming deltas,
     # so callers must not print it a second time.
     streamed: bool = False
+    # M6.2: per-turn token/cost totals (0 / None when the provider reports none).
+    tokens_in: int = 0
+    tokens_out: int = 0
+    cost_usd: float | None = None
 
 
 class AgentLoop:
@@ -147,6 +152,7 @@ class AgentLoop:
         config: LoopConfig | None = None,
         event_logger: SessionEventLogger | None = None,
         on_delta: Callable[[str], None] | None = None,
+        cost_tracker: CostTracker | None = None,
     ) -> None:
         self._provider = provider
         self._registry = registry
@@ -157,6 +163,7 @@ class AgentLoop:
         self._stall = StallDetector()
         self._event_logger = event_logger
         self._on_delta = on_delta or _default_on_delta
+        self.cost_tracker = cost_tracker or CostTracker()
         # Render the system prompt once at construction time so the model sees
         # the list of currently-registered tools without anyone having to
         # hand-update the prompt string when a tool is added/removed.
@@ -234,6 +241,9 @@ class AgentLoop:
         abort_reason: AbortReason = "none"
         last_streamed = False
         final_streamed = False
+        turn_tokens_in = 0
+        turn_tokens_out = 0
+        turn_cost: float | None = None
 
         # Retry counters — persisted across while iterations so exhaustion works.
         provider_retry = 0
@@ -256,6 +266,17 @@ class AgentLoop:
             try:
                 response, last_streamed = await self._call_llm(messages, tool_defs)
                 provider_retry = 0  # reset on success
+
+                # M6.2: track tokens + cost for every LLM call (AGENTS.md rule #4)
+                if response.usage:
+                    call_cost = response.cost_usd
+                    if call_cost is None:
+                        call_cost = estimate_cost_usd(self._provider.model, response.usage)
+                    self.cost_tracker.add(response.usage, call_cost)
+                    turn_tokens_in += int(response.usage.get("prompt_tokens", 0) or 0)
+                    turn_tokens_out += int(response.usage.get("completion_tokens", 0) or 0)
+                    if call_cost is not None:
+                        turn_cost = (turn_cost or 0.0) + call_cost
                 self._logger.info(
                     "llm_response stop_reason=%r tool_calls=%d content_len=%d",
                     response.stop_reason,
@@ -535,6 +556,16 @@ class AgentLoop:
 
             # Loop back; compression is done at the top of the next iteration.
 
+        self._emit(
+            SessionEventType.COST_SNAPSHOT,
+            turn_prompt_tokens=turn_tokens_in,
+            turn_completion_tokens=turn_tokens_out,
+            turn_cost_usd=turn_cost,
+            total_prompt_tokens=self.cost_tracker.prompt_tokens,
+            total_completion_tokens=self.cost_tracker.completion_tokens,
+            total_cost_usd=self.cost_tracker.cost_usd,
+        )
+
         return TurnResult(
             final_text=final_text,
             tool_calls_made=tool_calls_made,
@@ -542,4 +573,7 @@ class AgentLoop:
             hit_tool_call_limit=hit_limit,
             abort_reason=abort_reason,
             streamed=final_streamed,
+            tokens_in=turn_tokens_in,
+            tokens_out=turn_tokens_out,
+            cost_usd=turn_cost,
         )
