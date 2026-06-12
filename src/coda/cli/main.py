@@ -239,7 +239,7 @@ def main(
         envvar="CODA_APPROVAL",
     ),
     max_tool_calls: int = typer.Option(
-        15,
+        25,
         "--max-tool-calls",
         help="Maximum tool calls per turn before the loop aborts.",
     ),
@@ -401,7 +401,7 @@ def _build_session_components(
     api_key: str | None,
     api_base: str | None,
     approval_mode: str,
-    max_tool_calls: int = 15,
+    max_tool_calls: int = 25,
     max_tokens: int = 16384,
     summary_window: int = 2,  # noqa: ARG001  (reserved for M5 compactor wiring)
     resume_session_id: str | None = None,

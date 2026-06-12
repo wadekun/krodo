@@ -279,3 +279,97 @@ class TestReplaySkipsMetadata:
         assert stats.turns == 0
         assert stats.messages_restored == 0
         assert not stats.compressed
+
+
+# ---------------------------------------------------------------------------
+# 5. Healing dangling tool_use (sessions interrupted mid-batch)
+# ---------------------------------------------------------------------------
+
+
+class TestReplayHealsDanglingToolUse:
+    def test_dangling_tool_use_at_end_of_stream_gets_skipped_result(self) -> None:
+        """Sessions killed mid-batch (e.g. old tool-call-limit bug) self-heal."""
+        ctx = _ctx()
+        events = [
+            _event(SessionEventType.USER_MESSAGE, 1, {"content": "do work"}),
+            _event(
+                SessionEventType.ASSISTANT_MESSAGE,
+                2,
+                {
+                    "content": "",
+                    "tool_calls": [
+                        {"id": "tc-done", "name": "read_file", "arguments": {"path": "a"}},
+                        {"id": "tc-dangling", "name": "edit_file", "arguments": {"path": "b"}},
+                    ],
+                },
+            ),
+            _event(
+                SessionEventType.TOOL_RESULT,
+                3,
+                {"tool_call_id": "tc-done", "content": "ok", "is_error": False},
+            ),
+            # tc-dangling never got a result — the session was interrupted.
+        ]
+
+        replay_events(events, ctx)
+
+        history = ctx.history
+        tool_msgs = {m.tool_call_id: m for m in history if m.role == "tool"}
+        assert set(tool_msgs) == {"tc-done", "tc-dangling"}
+        healed = tool_msgs["tc-dangling"]
+        assert "skipped" in healed.content
+
+    def test_dangling_tool_use_healed_before_next_user_message(self) -> None:
+        """The synthesized result is inserted BEFORE the following user msg."""
+        ctx = _ctx()
+        events = [
+            _event(SessionEventType.USER_MESSAGE, 1, {"content": "turn one"}),
+            _event(
+                SessionEventType.ASSISTANT_MESSAGE,
+                2,
+                {
+                    "content": "",
+                    "tool_calls": [
+                        {"id": "tc-x", "name": "run_shell", "arguments": {"command": "ls"}}
+                    ],
+                },
+            ),
+            # No TOOL_RESULT — next turn starts directly.
+            _event(SessionEventType.USER_MESSAGE, 3, {"content": "继续"}),
+            _event(SessionEventType.ASSISTANT_MESSAGE, 4, {"content": "ok"}),
+        ]
+
+        replay_events(events, ctx)
+
+        roles = [m.role for m in ctx.history]
+        # user, assistant(tool_calls), tool(synthesized), user, assistant
+        assert roles == ["user", "assistant", "tool", "user", "assistant"]
+        assert ctx.history[2].tool_call_id == "tc-x"
+        assert "skipped" in ctx.history[2].content
+
+    def test_fully_paired_history_is_untouched(self) -> None:
+        """Healthy sessions replay without any synthesized results."""
+        ctx = _ctx()
+        events = [
+            _event(SessionEventType.USER_MESSAGE, 1, {"content": "read"}),
+            _event(
+                SessionEventType.ASSISTANT_MESSAGE,
+                2,
+                {
+                    "content": "",
+                    "tool_calls": [{"id": "tc-1", "name": "read_file", "arguments": {}}],
+                },
+            ),
+            _event(
+                SessionEventType.TOOL_RESULT,
+                3,
+                {"tool_call_id": "tc-1", "content": "data", "is_error": False},
+            ),
+            _event(SessionEventType.ASSISTANT_MESSAGE, 4, {"content": "done"}),
+        ]
+
+        stats = replay_events(events, ctx)
+
+        assert stats.messages_restored == 4
+        skipped = [m for m in ctx.history if m.role == "tool" and "skipped" in m.content]
+        assert not skipped

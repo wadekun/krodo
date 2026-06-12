@@ -141,6 +141,36 @@ async def run_repl(components: SessionComponents) -> str | None:
 
         _echo_turn_result(result)
 
+        # ----------------------------------------------------------------
+        # Tool-call limit hit but the task may be unfinished: offer to
+        # continue the SAME turn with a fresh budget.  `continue_turn()`
+        # does not inject a new user message — the model sees the
+        # synthesized "[skipped: tool call limit reached]" result and
+        # re-issues the pending work.  (Headless keeps the hard stop.)
+        # ----------------------------------------------------------------
+        while result.hit_tool_call_limit:
+            prompt_text = "Tool call limit reached — continue? [y/n] "
+            try:
+                if sys.stdin.isatty():
+                    answer = await pt_session.prompt_async(prompt_text)
+                else:
+                    answer = await asyncio.to_thread(input, prompt_text)
+            except (EOFError, KeyboardInterrupt):
+                _console.print("[yellow]Stopping this turn.[/yellow]")
+                break
+            if answer.strip().lower() not in ("y", "yes"):
+                break
+            try:
+                result = await components.loop.continue_turn()
+            except KeyboardInterrupt:
+                _console.print("[yellow]Turn cancelled.[/yellow]")
+                break
+            except Exception as exc:  # noqa: BLE001
+                _console.print(f"[red]Turn failed: {exc}[/red]")
+                components.logger.exception("repl_continue_uncaught_error")
+                break
+            _echo_turn_result(result)
+
     # ------------------------------------------------------------------
     # Session switch (`:resume <id>`): hand the target back to the caller,
     # which rebuilds components and re-enters run_repl.  No summary here —

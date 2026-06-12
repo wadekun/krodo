@@ -134,7 +134,7 @@ Events emitted by AgentLoop: `USER_MESSAGE`, `ASSISTANT_MESSAGE`, `TOOL_CALL`, `
 
 ### New CLI flags (M3)
 
-- `--max-tool-calls N` — tool calls per turn limit (default 15)
+- `--max-tool-calls N` — tool calls per turn limit (default 25; REPL offers to continue when hit)
 - `--summary-window N` — dialogue rounds to compress in one pass (default 2)
 - Startup banner now shows: model context window / compression strategy / max tool calls
 

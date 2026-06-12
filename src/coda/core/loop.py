@@ -54,7 +54,7 @@ from coda.tools.registry import ToolRegistry
 
 _console = Console(stderr=False)
 
-_DEFAULT_MAX_TOOL_CALLS = 15
+_DEFAULT_MAX_TOOL_CALLS = 25
 _logger = logging.getLogger(__name__)
 
 
@@ -226,12 +226,26 @@ class AgentLoop:
             self._on_delta("\n")
         return accumulator.to_message(), streamed_text
 
-    async def run(self, user_input: str) -> TurnResult:  # noqa: C901
+    async def run(self, user_input: str) -> TurnResult:
         """Execute one full agent turn for *user_input*."""
         self.context_manager.add_user_input(user_input)
         self._emit(SessionEventType.USER_MESSAGE, content=user_input)
         self._stall.reset()
+        return await self._run_loop()
 
+    async def continue_turn(self) -> TurnResult:
+        """Resume the current turn after a tool-call-limit interruption.
+
+        Re-enters the agent loop with a fresh tool budget WITHOUT adding a
+        new user message: the model sees the synthesized
+        ``[skipped: tool call limit reached]`` tool result from the
+        interrupted batch and naturally re-issues the pending work.
+        """
+        self._stall.reset()
+        return await self._run_loop()
+
+    async def _run_loop(self) -> TurnResult:  # noqa: C901
+        """Drive the ReAct loop until a final answer, abort, or budget stop."""
         tool_defs = self._registry.all_defs()
 
         tool_calls_made = 0
@@ -390,6 +404,8 @@ class AgentLoop:
             )
 
             had_invalid_args = False
+            pending_recovery_msg: str | None = None
+            resolved_ids: set[str] = set()
             for tc in response.tool_calls:
                 if tool_calls_made >= self._config.max_tool_calls_per_turn:
                     hit_limit = True
@@ -434,13 +450,15 @@ class AgentLoop:
                             aborted = True
                             abort_reason = "invalid_args"
                             break
-                        recovery_msg = (
+                        # Deferred until after the missing tool_results are
+                        # synthesized below, so history keeps the legal
+                        # assistant -> tool_result -> user ordering.
+                        pending_recovery_msg = (
                             f"Your tool call '{tc.name}' had invalid or missing arguments: "
                             f"{exc.errors()[0]['msg']}. "
                             f"Required fields: {required}. "
                             "Please retry the tool call with all required arguments filled in."
                         )
-                        self.context_manager.add_user_input(recovery_msg)
                         had_invalid_args = True
                         break  # skip remaining tcs; outer while will retry LLM
 
@@ -539,6 +557,7 @@ class AgentLoop:
                     )
 
                 self.context_manager.append_tool_result(result)
+                resolved_ids.add(result.tool_call_id)
                 self._emit(
                     SessionEventType.TOOL_RESULT,
                     tool_call_id=result.tool_call_id,
@@ -549,6 +568,40 @@ class AgentLoop:
 
                 if aborted:
                     break
+
+            # ----------------------------------------------------------------
+            # Protocol safety: any tool_call in this batch that never produced
+            # a result (limit hit / abort / invalid-args break) gets a
+            # synthesized one. Anthropic rejects histories where a tool_use
+            # has no paired tool_result, which would otherwise brick the next
+            # LLM round of this session AND any later `coda resume`.
+            # ----------------------------------------------------------------
+            unresolved = [tc for tc in response.tool_calls if (tc.id or "") not in resolved_ids]
+            if unresolved:
+                if hit_limit:
+                    skip_reason = "[skipped: tool call limit reached]"
+                elif had_invalid_args and not aborted:
+                    skip_reason = "[skipped: invalid tool arguments; retrying]"
+                else:
+                    skip_reason = "[skipped: turn aborted]"
+                for tc in unresolved:
+                    skipped = ToolResult(
+                        tool_call_id=tc.id or "",
+                        content=skip_reason,
+                        is_error=True,
+                    )
+                    self.context_manager.append_tool_result(skipped)
+                    self._emit(
+                        SessionEventType.TOOL_RESULT,
+                        tool_call_id=skipped.tool_call_id,
+                        is_error=True,
+                        content_length=len(skip_reason),
+                    )
+
+            # Invalid-args recovery message goes in AFTER the synthesized
+            # results so the assistant -> tool_result -> user order is legal.
+            if pending_recovery_msg is not None:
+                self.context_manager.add_user_input(pending_recovery_msg)
 
             # If any tool call had invalid args we injected a recovery message
             # and broke out of the for-loop; retry the LLM without aborting.

@@ -287,6 +287,159 @@ async def test_loop_hits_tool_call_limit(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# AgentLoop — interrupted batches must not leave dangling tool_use
+# ---------------------------------------------------------------------------
+
+
+def _assert_all_tool_calls_paired(messages: list[Message]) -> None:
+    """Every tool_use id in *messages* has a matching tool result."""
+    pending: set[str] = set()
+    for msg in messages:
+        if msg.role == "assistant" and msg.tool_calls:
+            pending |= {tc.id for tc in msg.tool_calls if tc.id}
+        elif msg.role == "tool":
+            pending.discard(msg.tool_call_id or "")
+    assert not pending, f"dangling tool_use ids without results: {pending}"
+
+
+@pytest.mark.asyncio
+async def test_limit_interrupt_synthesizes_skipped_results(tmp_path: Path) -> None:
+    """Hitting the limit mid-batch pairs every unexecuted call with a result."""
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+
+    batch = [ToolCall(id=f"tc-{i}", name="echo", arguments={"message": f"m{i}"}) for i in range(3)]
+    provider = _FakeLLMProvider([Message(role="assistant", content="", tool_calls=batch)])
+
+    loop = AgentLoop(
+        provider=provider,
+        registry=registry,
+        tool_ctx=_ctx(tmp_path),
+        approval=_AutoApprovalManager(),
+        config=LoopConfig(max_tool_calls_per_turn=1),
+    )
+    result = await loop.run("do three things")
+
+    assert result.hit_tool_call_limit
+    assert result.tool_calls_made == 1
+
+    history = loop.context_manager.build_messages()
+    _assert_all_tool_calls_paired(history)
+    skipped = [m for m in history if m.role == "tool" and "skipped" in m.content]
+    assert len(skipped) == 2
+    assert all("tool call limit reached" in m.content for m in skipped)
+
+
+@pytest.mark.asyncio
+async def test_deny_interrupt_synthesizes_skipped_results(tmp_path: Path) -> None:
+    """A user deny mid-batch still pairs the remaining calls with results."""
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+
+    batch = [
+        ToolCall(id="tc-1", name="echo", arguments={"message": "a"}),
+        ToolCall(id="tc-2", name="echo", arguments={"message": "b"}),
+    ]
+    provider = _FakeLLMProvider([Message(role="assistant", content="", tool_calls=batch)])
+
+    loop = AgentLoop(
+        provider=provider,
+        registry=registry,
+        tool_ctx=_ctx(tmp_path),
+        approval=_DenyAllManager(),
+    )
+    result = await loop.run("two things")
+
+    assert result.aborted_by_user
+    history = loop.context_manager.build_messages()
+    _assert_all_tool_calls_paired(history)
+    tool_msgs = {m.tool_call_id: m.content for m in history if m.role == "tool"}
+    assert tool_msgs["tc-1"] == "[user denied tool call]"
+    assert "turn aborted" in tool_msgs["tc-2"]
+
+
+@pytest.mark.asyncio
+async def test_invalid_args_recovery_keeps_legal_order(tmp_path: Path) -> None:
+    """Invalid-args retry: synthesized result precedes the recovery user msg.
+
+    The fake provider re-validates the protocol on the retry call, so an
+    assistant → user (without tool_result) ordering bug would fail here.
+    """
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+
+    bad_call = ToolCall(id="tc-bad", name="echo", arguments={})  # missing `message`
+    provider = _FakeLLMProvider(
+        [
+            Message(role="assistant", content="", tool_calls=[bad_call]),
+            Message(role="assistant", content="recovered"),
+        ]
+    )
+
+    loop = AgentLoop(
+        provider=provider,
+        registry=registry,
+        tool_ctx=_ctx(tmp_path),
+        approval=_AutoApprovalManager(),
+    )
+    result = await loop.run("echo something")
+
+    assert result.final_text == "recovered"
+    history = loop.context_manager.build_messages()
+    _assert_all_tool_calls_paired(history)
+    # tool result for the bad call must come before the recovery user message
+    roles = [m.role for m in history]
+    tool_idx = roles.index("tool")
+    recovery_idx = next(
+        i for i, m in enumerate(history) if m.role == "user" and "invalid" in m.content
+    )
+    assert tool_idx < recovery_idx
+
+
+# ---------------------------------------------------------------------------
+# AgentLoop — continue_turn after limit
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_continue_turn_resumes_without_new_user_message(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+
+    batch = [
+        ToolCall(id="tc-1", name="echo", arguments={"message": "a"}),
+        ToolCall(id="tc-2", name="echo", arguments={"message": "b"}),
+    ]
+    provider = _FakeLLMProvider(
+        [
+            Message(role="assistant", content="", tool_calls=batch),
+            Message(role="assistant", content="all done"),
+        ]
+    )
+
+    loop = AgentLoop(
+        provider=provider,
+        registry=registry,
+        tool_ctx=_ctx(tmp_path),
+        approval=_AutoApprovalManager(),
+        config=LoopConfig(max_tool_calls_per_turn=1),
+    )
+    first = await loop.run("two things")
+    assert first.hit_tool_call_limit
+
+    users_before = sum(1 for m in loop.context_manager.history if m.role == "user")
+    second = await loop.continue_turn()
+    users_after = sum(1 for m in loop.context_manager.history if m.role == "user")
+
+    assert second.final_text == "all done"
+    assert not second.hit_tool_call_limit
+    assert users_after == users_before  # no synthetic user message injected
+    # The fake provider validated the protocol on the continuation call —
+    # if the skipped result were missing it would have raised there.
+    _assert_all_tool_calls_paired(loop.context_manager.build_messages())
+
+
+# ---------------------------------------------------------------------------
 # AgentLoop — multi-turn history persists
 # ---------------------------------------------------------------------------
 

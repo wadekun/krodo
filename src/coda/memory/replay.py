@@ -75,6 +75,26 @@ def replay_events(
     compressed = False
     last_approval_state: dict | None = None
 
+    # Healing for interrupted sessions: tool_use ids awaiting a tool_result.
+    # Sessions written before the dangling-tool_use fix (or killed mid-batch)
+    # may persist an assistant message whose tool calls never got results —
+    # Anthropic rejects such histories, so we synthesize "[skipped]" results
+    # whenever a non-tool_result event (or the end of the stream) follows.
+    pending_tool_ids: list[str] = []
+
+    def _flush_pending() -> None:
+        nonlocal messages_restored
+        for tc_id in pending_tool_ids:
+            ctx.append_tool_result(
+                ToolResult(
+                    tool_call_id=tc_id,
+                    content="[skipped: interrupted before execution]",
+                    is_error=True,
+                )
+            )
+            messages_restored += 1
+        pending_tool_ids.clear()
+
     for event in sorted_events:
         et = event.type
         data = event.data
@@ -84,6 +104,7 @@ def replay_events(
             continue
 
         elif et == SessionEventType.USER_MESSAGE:
+            _flush_pending()
             content = str(data.get("content", ""))
             if content:
                 ctx.add_user_input(content)
@@ -91,6 +112,7 @@ def replay_events(
                 turns += 1
 
         elif et == SessionEventType.ASSISTANT_MESSAGE:
+            _flush_pending()
             content = data.get("content", "")
             tool_calls_raw = data.get("tool_calls")
             from coda.core.types import ToolCall  # noqa: PLC0415
@@ -121,6 +143,8 @@ def replay_events(
             )
             ctx.append_assistant(msg)
             messages_restored += 1
+            if tool_calls:
+                pending_tool_ids.extend(tc.id for tc in tool_calls if tc.id)
 
         elif et == SessionEventType.TOOL_RESULT:
             tool_call_id = str(data.get("tool_call_id", ""))
@@ -133,6 +157,8 @@ def replay_events(
             )
             ctx.append_tool_result(result)
             messages_restored += 1
+            if tool_call_id in pending_tool_ids:
+                pending_tool_ids.remove(tool_call_id)
 
         elif et == SessionEventType.COMPRESSION:
             # Replace the currently replayed history with the compressed summary.
@@ -142,6 +168,7 @@ def replay_events(
             summary = str(data.get("summary", ""))
             if summary:
                 ctx._history.clear()  # noqa: SLF001 — intentional direct mutation
+                pending_tool_ids.clear()  # cleared history can't have dangling tool_use
                 ctx.add_user_input(
                     f"[Context compressed — summary of earlier conversation]\n{summary}"
                 )
@@ -156,6 +183,8 @@ def replay_events(
 
         # All other event types (TOOL_CALL, CHECKPOINT, UNDO, ERROR,
         # COST_SNAPSHOT) are metadata-only — skip.
+
+    _flush_pending()
 
     if approval is not None and last_approval_state is not None:
         approval.restore_state(last_approval_state)

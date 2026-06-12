@@ -169,7 +169,7 @@ CODA_TOKEN_RATIO=1.15 uv run coda --model anthropic/claude-3-5-sonnet "..."
 ### CLI flags (M3 new)
 
 ```bash
-# Limit tool calls per turn (default 15):
+# Limit tool calls per turn (default 25):
 uv run coda --max-tool-calls 5 "..."
 
 # Set compression window (how many dialogue rounds to compress at once):

@@ -42,7 +42,7 @@ def resume_command(
     api_key: str | None = None,
     api_base: str | None = None,
     approval: str = "auto_edit",
-    max_tool_calls: int = 15,
+    max_tool_calls: int = 25,
     max_tokens: int = 16384,
     list_recent: bool = False,
     _workspace_root: Path | None = None,  # test-only injection
@@ -457,7 +457,7 @@ def register_resume_app(app: typer.Typer) -> None:
             envvar="CODA_APPROVAL",
         ),
         max_tool_calls: int = typer.Option(
-            15,
+            25,
             "--max-tool-calls",
             help="Maximum tool calls per turn",
         ),
