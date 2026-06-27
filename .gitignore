@@ -34,10 +34,10 @@ Thumbs.db
 htmlcov/
 coverage.xml
 
-# Coda state
-.coda/cache/
-.coda/sessions/
-.coda/logs/
+# Krodo state
+.krodo/cache/
+.krodo/sessions/
+.krodo/logs/
 
 # Cursor state
 .cursor/
