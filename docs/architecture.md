@@ -1005,7 +1005,7 @@ krodo/
 - **1.8 持久化与记忆** — 产出：JSONL event-sourcing session（`SessionStore` Protocol + `JsonlSessionStore` 实现，SQLite 后端 Phase 2 再加）+ `AGENTS.md` 加载（项目+用户层）｜ 验收：`krodo resume <id>` 完整恢复对话。
 - **1.9 可观测性** — 产出：structlog JSONL 日志 + cost log + secret redactor ｜ 验收：每个 tool call 有 trace 行；日志中无任何 API key 字面量。✅ **M6 交付**：`CostTracker`（`krodo/obs/cost.py`）每次 LLM 调用记录 tokens + cost，每 turn 落 `COST_SNAPSHOT` 事件，summary 显示 tokens/cost 行。
 - **1.10 CLI** — 产出：Typer 入口 + REPL（prompt_toolkit）+ `krodo exec` headless + Rich 流式 / diff 渲染 ｜ 验收：三种入口（REPL / `exec` / pipe stdin）皆可用。✅ **M6 交付**：三入口齐备（REPL / `krodo "task"` headless / `echo task | krodo` pipe），流式输出（M6.1）+ REPL slash 命令（M6.4）落地。
-- **1.11 文档与发布** — 产出：README、QUICKSTART、ARCHITECTURE（本文）、CONTRIBUTING、SECURITY、CHANGELOG ｜ 验收：发布 v0.1 到 PyPI + GitHub Release，`pipx install krodo` 可用。
+- **1.11 文档与发布** ✅ **M7 交付（PyPI 推迟）** — 产出：README、QUICKSTART、ARCHITECTURE（本文）、CONTRIBUTING、SECURITY、CHANGELOG ｜ 验收：✅ 文档四件套齐备；✅ mypy strict 清零；✅ 品牌改名 Coda → krodo 完成；✅ GitHub Release / tag 走通（owner 确认后）。**PyPI 上传推迟**：发行名 `krodo` 锁定，但首版走 GitHub Release 渠道，PyPI 在后续 minor 版本补上（理由：第三方占用调查 + 项目仍在 pre-alpha）。
 
 **退出标准**：用 v0.1 给本项目自己提一个真实 PR 并合入。
 

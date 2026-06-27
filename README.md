@@ -1,5 +1,10 @@
 # Krodo
 
+[![CI](https://github.com/liangck/krodo/actions/workflows/ci.yml/badge.svg)](https://github.com/liangck/krodo/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![Status: Pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange.svg)](CHANGELOG.md)
+
 > A local-first, multi-provider **coding agent CLI**, built with Python 3.12+.
 >
 > Status: 🚧 **Pre-alpha (v0.1.0)** — actively in Phase 1 development. Not yet ready for general use.
@@ -99,10 +104,18 @@ krodo resume --root /tmp/krodo-sandbox a3f2b1
 `krodo resume` replays the stored conversation history into a fresh REPL, so the model
 remembers everything from the prior session — files edited, tools called, and dialogue.
 
-### Stable release (v0.1 — not yet published)
+### Stable release (v0.1 — not yet on PyPI)
+
+The PyPI upload is **deferred past v0.1.0** while the `krodo` distribution
+name finalises. First releases are GitHub Release + `uv tool install
+git+https://github.com/liangck/krodo`. PyPI upload will land in a minor
+release after the name is locked; see [`CHANGELOG.md`](CHANGELOG.md) for
+status.
+
+Install from GitHub in the meantime:
 
 ```bash
-pipx install krodo
+uv tool install git+https://github.com/liangck/krodo
 krodo --help
 ```
 
@@ -349,10 +362,21 @@ This is a learning + production project. Contributions welcome once Phase 1 stab
 
 Ground rules:
 
-- All code goes through `ruff` + `mypy --strict` + `pytest --cov` (see `pyproject.toml`).
+- All code goes through `ruff` + `mypy --strict` + `pytest --cov` (see [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full CI gate).
 - All new tools come with 100% unit test coverage and an integration test against a recorded LLM response (`vcrpy`).
 - All changes that touch the agent loop must pass the regression matrix (Phase 2+).
 - See [`docs/architecture.md`](docs/architecture.md) §11 for the seven engineering principles.
+
+## Documentation
+
+| Document | What's in it |
+|----------|-------------|
+| [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | 5-minute install + first task |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Dev setup, CI gate, PR flow, commit conventions |
+| [`SECURITY.md`](SECURITY.md) | Threat model, sandbox boundaries, vulnerability reporting |
+| [`CHANGELOG.md`](CHANGELOG.md) | Milestone-by-milestone changes |
+| [`docs/architecture.md`](docs/architecture.md) | Full design baseline (the source of truth) |
+| [`AGENTS.md`](AGENTS.md) | Auto-loaded project memory (loaded into every session) |
 
 ## License
 
