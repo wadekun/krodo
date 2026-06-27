@@ -240,6 +240,6 @@ def register_undo_app(app: typer.Typer) -> None:
         ),
     ) -> None:
         """Restore files to the previous checkpoint created by Coda."""
-        undo_command(root=root, session=session)  # type: ignore[arg-type]
+        undo_command(root=root, session=session)
 
     app.add_typer(undo_sub)

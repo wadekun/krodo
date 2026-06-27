@@ -135,7 +135,7 @@ def _load_yaml(path: Path) -> dict[str, object] | None:
         if not isinstance(data, dict):
             logger.warning("Config %s must be a mapping (got %s), ignoring.", path, type(data))
             return None
-        return data  # type: ignore[return-value]
+        return data
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not parse config %s: %s", path, exc)
         return None

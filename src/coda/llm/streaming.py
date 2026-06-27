@@ -24,6 +24,26 @@ class _ToolCallFragments:
     argument_parts: list[str] = field(default_factory=list)
 
 
+def _coerce_usage_int(val: object) -> int:
+    """Coerce a loosely-typed ``LLMChunk.usage`` value to int.
+
+    LiteLLM types ``usage`` as ``dict[str, object]``; runtime values are int
+    (occasionally str on some providers). We narrow via isinstance so mypy
+    stays happy without ``# type: ignore`` and silently default to 0 on
+    unexpected types instead of raising.
+    """
+    if isinstance(val, bool):  # bool is subclass of int — handle explicitly
+        return int(val)
+    if isinstance(val, (int, float)):
+        return int(val)
+    if isinstance(val, str):
+        try:
+            return int(val)
+        except ValueError:
+            return 0
+    return 0
+
+
 class ChunkAccumulator:
     """Feed ``LLMChunk``s in order; read back a complete assistant ``Message``.
 
@@ -63,9 +83,9 @@ class ChunkAccumulator:
 
         if chunk.usage:
             self.usage = {
-                "prompt_tokens": int(chunk.usage.get("prompt_tokens", 0) or 0),
-                "completion_tokens": int(chunk.usage.get("completion_tokens", 0) or 0),
-                "total_tokens": int(chunk.usage.get("total_tokens", 0) or 0),
+                "prompt_tokens": _coerce_usage_int(chunk.usage.get("prompt_tokens", 0)),
+                "completion_tokens": _coerce_usage_int(chunk.usage.get("completion_tokens", 0)),
+                "total_tokens": _coerce_usage_int(chunk.usage.get("total_tokens", 0)),
             }
 
         if chunk.finish_reason:

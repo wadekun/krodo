@@ -57,6 +57,7 @@ dev = [
     "pytest-cov>=5",
     "pytest-mock>=3",
     "ruff>=0.5",
+    "types-pyyaml>=6.0.12.20260518",
     "vcrpy>=6",
 ]
 

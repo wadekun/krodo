@@ -30,6 +30,8 @@ from coda.memory.store import JsonlSessionStore
 
 if TYPE_CHECKING:
     from coda.cli.main import SessionComponents
+    from coda.core.types import Message
+    from coda.memory.store import SessionRow
 
 _DEFAULT_MODEL = "anthropic/claude-3-5-sonnet-20241022"
 
@@ -114,7 +116,7 @@ def resume_command(
 # ---------------------------------------------------------------------------
 
 
-def render_sessions_table(rows: list) -> object:
+def render_sessions_table(rows: list[SessionRow]) -> object:
     """Build the Rich table of recent sessions (shared with the REPL ``:sessions``)."""
     from rich.table import Table  # noqa: PLC0415
 
@@ -184,7 +186,7 @@ async def repl_session_cycle(
 
 
 def _print_conversation_history(
-    history: list,
+    history: list[Message],
     workspace_root: Path | None = None,
 ) -> None:
     """Print a compact summary of the replayed conversation to stderr.
@@ -294,9 +296,7 @@ def _history_entries(
 
     if tool_calls:
         summaries = [
-            _tool_call_summary(tc, workspace_root)
-            for tc in tool_calls
-            if getattr(tc, "name", "")
+            _tool_call_summary(tc, workspace_root) for tc in tool_calls if getattr(tc, "name", "")
         ]
         names = ", ".join(summaries)
         if names:
@@ -395,8 +395,7 @@ def _resolve_session_id(
         from rich.console import Console  # noqa: PLC0415
 
         Console().print(
-            f"[red]Ambiguous session prefix '{session_id}'. "
-            f"Matches: {', '.join(matches[:5])}[/red]"
+            f"[red]Ambiguous session prefix '{session_id}'. Matches: {', '.join(matches[:5])}[/red]"
         )
         raise typer.Exit(code=1)
 

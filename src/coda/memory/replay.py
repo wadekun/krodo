@@ -38,9 +38,9 @@ if TYPE_CHECKING:
 class ReplayStats:
     """Summary of what was replayed."""
 
-    turns: int            # number of complete user-assistant exchanges
+    turns: int  # number of complete user-assistant exchanges
     messages_restored: int  # total messages appended to history
-    compressed: bool      # True if at least one COMPRESSION event was encountered
+    compressed: bool  # True if at least one COMPRESSION event was encountered
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +73,7 @@ def replay_events(
     turns = 0
     messages_restored = 0
     compressed = False
-    last_approval_state: dict | None = None
+    last_approval_state: dict[str, object] | None = None
 
     # Healing for interrupted sessions: tool_use ids awaiting a tool_result.
     # Sessions written before the dangling-tool_use fix (or killed mid-batch)
@@ -113,7 +113,7 @@ def replay_events(
 
         elif et == SessionEventType.ASSISTANT_MESSAGE:
             _flush_pending()
-            content = data.get("content", "")
+            content = str(data.get("content", ""))
             tool_calls_raw = data.get("tool_calls")
             from coda.core.types import ToolCall  # noqa: PLC0415
 
