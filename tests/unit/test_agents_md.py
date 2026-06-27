@@ -214,9 +214,7 @@ class TestSha256:
         assert bundle.sha256() is None
 
     def test_sha256_returns_hex_string(self, tmp_path: Path) -> None:
-        bundle = AgentsMdBundle(
-            content="some content", sources=[], total_tokens=3, truncated=False
-        )
+        bundle = AgentsMdBundle(content="some content", sources=[], total_tokens=3, truncated=False)
         digest = bundle.sha256()
         assert digest is not None
         assert len(digest) == 64  # SHA-256 hex = 64 chars

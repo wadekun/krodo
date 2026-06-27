@@ -390,9 +390,7 @@ class TestExistingPatternRegression:
             "check the output",
         ],
     )
-    def test_positional_prompt_still_works(
-        self, tmp_path: Path, prompt_token: str
-    ) -> None:
+    def test_positional_prompt_still_works(self, tmp_path: Path, prompt_token: str) -> None:
         """Arbitrary non-subcommand prompts must be passed through as headless prompt."""
         runner = CliRunner()
         captured: list[str] = []
@@ -410,6 +408,5 @@ class TestExistingPatternRegression:
             )
 
         assert captured and captured[0] == prompt_token, (
-            f"prompt '{prompt_token}' not passed through. "
-            f"exit={result.exit_code}\n{result.output}"
+            f"prompt '{prompt_token}' not passed through. exit={result.exit_code}\n{result.output}"
         )

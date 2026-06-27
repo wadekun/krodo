@@ -155,9 +155,7 @@ class SessionEventLogger:
             with self._jsonl_path.open("a", encoding="utf-8") as fh:
                 fh.write(line)
         except OSError as exc:
-            self._logger.warning(
-                "Failed to write session event to %s: %s", self._jsonl_path, exc
-            )
+            self._logger.warning("Failed to write session event to %s: %s", self._jsonl_path, exc)
 
     # ------------------------------------------------------------------
     # Factories

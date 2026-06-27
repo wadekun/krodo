@@ -332,9 +332,12 @@ def test_cli_max_tokens_cli_overrides_env(tmp_path: Path) -> None:
         result = runner.invoke(
             app,
             [
-                "--root", str(tmp_path),
-                "--approval", "full_auto",
-                "--max-tokens", "4096",
+                "--root",
+                str(tmp_path),
+                "--approval",
+                "full_auto",
+                "--max-tokens",
+                "4096",
                 "go",
             ],
             env={"KRODO_MAX_TOKENS": "8192"},
@@ -354,9 +357,12 @@ def test_cli_banner_shows_max_output(tmp_path: Path) -> None:
         result = runner.invoke(
             app,
             [
-                "--root", str(tmp_path),
-                "--approval", "full_auto",
-                "--max-tokens", "12345",
+                "--root",
+                str(tmp_path),
+                "--approval",
+                "full_auto",
+                "--max-tokens",
+                "12345",
                 "go",
             ],
         )

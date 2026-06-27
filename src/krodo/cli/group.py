@@ -189,13 +189,9 @@ class KrodoGroup(TyperGroup):
         ``--root`` still takes priority because Click only consults
         ``default_map`` when the option is still at its built-in default).
         """
-        shared_keys = frozenset(
-            {"root", "model", "api_key", "api_base", "approval", "max_tokens"}
-        )
+        shared_keys = frozenset({"root", "model", "api_key", "api_base", "approval", "max_tokens"})
         inherited: dict[str, Any] = {
-            k: v
-            for k, v in ctx.params.items()
-            if k in shared_keys and v is not None
+            k: v for k, v in ctx.params.items() if k in shared_keys and v is not None
         }
         if not inherited:
             return

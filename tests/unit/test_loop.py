@@ -829,9 +829,7 @@ async def test_assistant_text_printed_with_tool_calls(
 
     captured = capsys.readouterr()
     # The reasoning text must appear somewhere in stdout
-    assert reasoning in captured.out, (
-        f"reasoning text not found in stdout; got: {captured.out!r}"
-    )
+    assert reasoning in captured.out, f"reasoning text not found in stdout; got: {captured.out!r}"
 
 
 # ---------------------------------------------------------------------------

@@ -7,7 +7,7 @@ style refactors are likely to be deferred.
 ## 1. Development environment
 
 ```bash
-git clone https://github.com/liangck/krodo
+git clone https://github.com/wadekun/krodo
 cd krodo
 uv sync                            # installs runtime + dev deps
 ```
@@ -159,7 +159,7 @@ Release process is being defined in M7. The short version:
 
 PyPI publication (trusted-publishers via GitHub Actions) is **deferred
 past v0.1.0**; first releases are GitHub Release + `uv tool install
-git+https://github.com/liangck/krodo`.
+git+https://github.com/wadekun/krodo`.
 
 ## 8. Conduct & licensing
 

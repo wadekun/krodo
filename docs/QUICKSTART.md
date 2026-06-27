@@ -17,7 +17,7 @@ Krodo is **pre-alpha (v0.1.0)**. The PyPI upload is deferred while the
 ### From source (recommended for v0.1.0)
 
 ```bash
-git clone https://github.com/liangck/krodo
+git clone https://github.com/wadekun/krodo
 cd krodo
 uv sync
 ```

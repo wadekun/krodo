@@ -255,9 +255,7 @@ def test_session_trust_survives_resume(tmp_path: Path) -> None:
         for line in session_files[0].read_text(encoding="utf-8").splitlines()
         if line.strip() and json.loads(line)["type"] == "approval_decision"
     ]
-    assert any(
-        d["data"].get("state", {}).get("trusted_tools") == ["write_file"] for d in decisions
-    )
+    assert any(d["data"].get("state", {}).get("trusted_tools") == ["write_file"] for d in decisions)
 
     # ---------------- Session 2: resume — same tool must NOT prompt ---------
     from krodo.cli.resume import resume_command  # noqa: PLC0415

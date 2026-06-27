@@ -120,9 +120,7 @@ class TestFindSubcommandSplit:
         result = grp._find_subcommand_split(ctx, ["resume"])  # noqa: SLF001
         assert result == (0, "resume")
 
-    def test_subcommand_after_long_value_option(
-        self, grp: KrodoGroup, ctx: click.Context
-    ) -> None:
+    def test_subcommand_after_long_value_option(self, grp: KrodoGroup, ctx: click.Context) -> None:
         """--root /X resume → (2, 'resume') (skips key+value)."""
         result = grp._find_subcommand_split(ctx, ["--root", "/tmp/X", "resume"])  # noqa: SLF001
         assert result == (2, "resume")
@@ -134,32 +132,24 @@ class TestFindSubcommandSplit:
         result = grp._find_subcommand_split(ctx, ["--root=/tmp/X", "resume"])  # noqa: SLF001
         assert result == (1, "resume")
 
-    def test_subcommand_after_short_value_option(
-        self, grp: KrodoGroup, ctx: click.Context
-    ) -> None:
+    def test_subcommand_after_short_value_option(self, grp: KrodoGroup, ctx: click.Context) -> None:
         """-r /X resume → (2, 'resume')."""
         result = grp._find_subcommand_split(ctx, ["-r", "/tmp/X", "resume"])  # noqa: SLF001
         assert result == (2, "resume")
 
-    def test_subcommand_after_flag_option(
-        self, grp: KrodoGroup, ctx: click.Context
-    ) -> None:
+    def test_subcommand_after_flag_option(self, grp: KrodoGroup, ctx: click.Context) -> None:
         """--verbose resume → (1, 'resume') (flag takes no value)."""
         result = grp._find_subcommand_split(ctx, ["--verbose", "resume"])  # noqa: SLF001
         assert result == (1, "resume")
 
-    def test_subcommand_after_mixed_options(
-        self, grp: KrodoGroup, ctx: click.Context
-    ) -> None:
+    def test_subcommand_after_mixed_options(self, grp: KrodoGroup, ctx: click.Context) -> None:
         """--root /X --approval full_auto resume → (4, 'resume')."""
         result = grp._find_subcommand_split(  # noqa: SLF001
             ctx, ["--root", "/tmp/X", "--approval", "full_auto", "resume"]
         )
         assert result == (4, "resume")
 
-    def test_subcommand_after_mixed_short_long(
-        self, grp: KrodoGroup, ctx: click.Context
-    ) -> None:
+    def test_subcommand_after_mixed_short_long(self, grp: KrodoGroup, ctx: click.Context) -> None:
         """-r /X -m gpt-4 resume → (4, 'resume')."""
         result = grp._find_subcommand_split(  # noqa: SLF001
             ctx, ["-r", "/tmp/X", "-m", "gpt-4", "resume"]
@@ -176,9 +166,7 @@ class TestFindSubcommandSplit:
         result = grp._find_subcommand_split(ctx, ["doctor"])  # noqa: SLF001
         assert result == (0, "doctor")
 
-    def test_no_subcommand_plain_prompt(
-        self, grp: KrodoGroup, ctx: click.Context
-    ) -> None:
+    def test_no_subcommand_plain_prompt(self, grp: KrodoGroup, ctx: click.Context) -> None:
         """Plain prompt string → None."""
         result = grp._find_subcommand_split(ctx, ["create a mario game"])  # noqa: SLF001
         assert result is None
@@ -190,30 +178,22 @@ class TestFindSubcommandSplit:
         result = grp._find_subcommand_split(ctx, ["--model", "resume"])  # noqa: SLF001
         assert result is None
 
-    def test_no_subcommand_option_value_short(
-        self, grp: KrodoGroup, ctx: click.Context
-    ) -> None:
+    def test_no_subcommand_option_value_short(self, grp: KrodoGroup, ctx: click.Context) -> None:
         """-m resume should not route to resume."""
         result = grp._find_subcommand_split(ctx, ["-m", "resume"])  # noqa: SLF001
         assert result is None
 
-    def test_no_subcommand_empty_args(
-        self, grp: KrodoGroup, ctx: click.Context
-    ) -> None:
+    def test_no_subcommand_empty_args(self, grp: KrodoGroup, ctx: click.Context) -> None:
         """Empty args → None."""
         result = grp._find_subcommand_split(ctx, [])  # noqa: SLF001
         assert result is None
 
-    def test_no_subcommand_all_options(
-        self, grp: KrodoGroup, ctx: click.Context
-    ) -> None:
+    def test_no_subcommand_all_options(self, grp: KrodoGroup, ctx: click.Context) -> None:
         """Only options (no positional) → None."""
         result = grp._find_subcommand_split(ctx, ["--root", "/X", "--verbose"])  # noqa: SLF001
         assert result is None
 
-    def test_subcommand_after_double_dash(
-        self, grp: KrodoGroup, ctx: click.Context
-    ) -> None:
+    def test_subcommand_after_double_dash(self, grp: KrodoGroup, ctx: click.Context) -> None:
         """After '--', the next resume token should be detected as subcommand."""
         result = grp._find_subcommand_split(ctx, ["--", "resume"])  # noqa: SLF001
         assert result == (1, "resume")
@@ -225,9 +205,7 @@ class TestFindSubcommandSplit:
         result = grp._find_subcommand_split(ctx, ["resume the work from yesterday"])  # noqa: SLF001
         assert result is None
 
-    def test_subcommand_with_trailing_args(
-        self, grp: KrodoGroup, ctx: click.Context
-    ) -> None:
+    def test_subcommand_with_trailing_args(self, grp: KrodoGroup, ctx: click.Context) -> None:
         """resume abc123 → finds resume at index 0; abc123 is subcmd arg."""
         result = grp._find_subcommand_split(ctx, ["resume", "abc123"])  # noqa: SLF001
         assert result == (0, "resume")
@@ -345,9 +323,7 @@ class TestParseArgs:
         assert ctx._protected_args == []  # noqa: SLF001
         assert ctx.params.get("prompt") is None
 
-    def test_option_value_matching_subcommand_name_not_routed(
-        self, grp: KrodoGroup
-    ) -> None:
+    def test_option_value_matching_subcommand_name_not_routed(self, grp: KrodoGroup) -> None:
         """--model resume should NOT route to resume subcommand."""
         ctx = self._make_ctx(grp)
         grp.parse_args(ctx, ["--model", "resume"])

@@ -1,6 +1,6 @@
 # Krodo
 
-[![CI](https://github.com/liangck/krodo/actions/workflows/ci.yml/badge.svg)](https://github.com/liangck/krodo/actions/workflows/ci.yml)
+[![CI](https://github.com/wadekun/krodo/actions/workflows/ci.yml/badge.svg)](https://github.com/wadekun/krodo/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![Status: Pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange.svg)](CHANGELOG.md)
@@ -108,14 +108,14 @@ remembers everything from the prior session — files edited, tools called, and 
 
 The PyPI upload is **deferred past v0.1.0** while the `krodo` distribution
 name finalises. First releases are GitHub Release + `uv tool install
-git+https://github.com/liangck/krodo`. PyPI upload will land in a minor
+git+https://github.com/wadekun/krodo`. PyPI upload will land in a minor
 release after the name is locked; see [`CHANGELOG.md`](CHANGELOG.md) for
 status.
 
 Install from GitHub in the meantime:
 
 ```bash
-uv tool install git+https://github.com/liangck/krodo
+uv tool install git+https://github.com/wadekun/krodo
 krodo --help
 ```
 

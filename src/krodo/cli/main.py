@@ -115,8 +115,8 @@ class SessionComponents:
     session_id: str
     event_logger: SessionEventLogger
     store: SessionStore
-    sessions_path: Path   # <workspace>/.krodo/sessions/<id>.jsonl — event log
-    log_path: Path        # <workspace>/.krodo/logs/<id>.log — structlog application log
+    sessions_path: Path  # <workspace>/.krodo/sessions/<id>.jsonl — event log
+    log_path: Path  # <workspace>/.krodo/logs/<id>.log — structlog application log
     max_tokens: int
     cost_tracker: CostTracker
     approval: TerminalApprovalManager
@@ -268,11 +268,7 @@ def main(
         return
 
     # M5.4: Load config file defaults, applying them where CLI/env left defaults
-    resolved_root = (
-        root.expanduser().resolve()
-        if root is not None
-        else None
-    )
+    resolved_root = root.expanduser().resolve() if root is not None else None
     # We need workspace root to load config; use a quick resolver here
     _quick_ws_root = resolved_root or _quick_resolve_root()
     cfg, _cfg_sources = load_config(_quick_ws_root)
@@ -284,10 +280,7 @@ def main(
         model = cfg.model
     if cfg.api_base is not None and ctx.get_parameter_source("api_base") == ParameterSource.DEFAULT:
         api_base = cfg.api_base
-    if (
-        cfg.approval is not None
-        and ctx.get_parameter_source("approval") == ParameterSource.DEFAULT
-    ):
+    if cfg.approval is not None and ctx.get_parameter_source("approval") == ParameterSource.DEFAULT:
         approval = cfg.approval
     if (
         cfg.max_tokens is not None

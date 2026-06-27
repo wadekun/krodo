@@ -222,8 +222,7 @@ class TestCrossProcessSeqResume:
         logger_b = SessionEventLogger.from_store(store_b, sid)
 
         assert logger_b.next_seq == 4, (
-            f"Expected _seq=4, got {logger_b.next_seq}. "
-            "Cross-process seq resume broken."
+            f"Expected _seq=4, got {logger_b.next_seq}. Cross-process seq resume broken."
         )
 
 
