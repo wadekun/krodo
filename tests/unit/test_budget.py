@@ -1,18 +1,18 @@
-"""Unit tests for src/coda/core/budget.py."""
+"""Unit tests for src/krodo/core/budget.py."""
 
 from __future__ import annotations
 
 import pytest
 from pydantic import BaseModel
 
-from coda.core.budget import (
+from krodo.core.budget import (
     BudgetAction,
     BudgetCalculator,
     BudgetStatus,
     _get_ratio,
     get_context_window,
 )
-from coda.core.types import Message, ToolDef
+from krodo.core.types import Message, ToolDef
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -92,11 +92,11 @@ class TestGetRatio:
         assert _get_ratio("qwen3") == 1.05
 
     def test_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("CODA_TOKEN_RATIO", "1.25")
+        monkeypatch.setenv("KRODO_TOKEN_RATIO", "1.25")
         assert _get_ratio("gpt-4o") == 1.25
 
     def test_invalid_env_falls_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("CODA_TOKEN_RATIO", "not-a-number")
+        monkeypatch.setenv("KRODO_TOKEN_RATIO", "not-a-number")
         assert _get_ratio("gpt-4o") == 1.0
 
 
@@ -212,7 +212,7 @@ class TestBudgetStatus:
 
 class TestContextManagerWithBudget:
     def test_token_usage_returns_real_counts(self) -> None:
-        from coda.core.context import InMemoryContextManager
+        from krodo.core.context import InMemoryContextManager
 
         calc = BudgetCalculator(model="gpt-4o", count_fn=lambda msgs: len(msgs) * 100)
         ctx = InMemoryContextManager(
@@ -226,7 +226,7 @@ class TestContextManagerWithBudget:
 
     @pytest.mark.asyncio
     async def test_compress_if_needed_returns_none_without_budget(self) -> None:
-        from coda.core.context import InMemoryContextManager
+        from krodo.core.context import InMemoryContextManager
 
         ctx = InMemoryContextManager(system_prompt="sys")
         ctx.add_user_input("hello")
@@ -235,7 +235,7 @@ class TestContextManagerWithBudget:
 
     @pytest.mark.asyncio
     async def test_compress_if_needed_truncates_when_over_95_percent(self) -> None:
-        from coda.core.context import InMemoryContextManager
+        from krodo.core.context import InMemoryContextManager
 
         # Make count_fn return a very large number so we're always over threshold
         calc = BudgetCalculator(
@@ -251,7 +251,7 @@ class TestContextManagerWithBudget:
 
     @pytest.mark.asyncio
     async def test_compress_if_needed_returns_none_when_ok(self) -> None:
-        from coda.core.context import InMemoryContextManager
+        from krodo.core.context import InMemoryContextManager
 
         calc = BudgetCalculator(model="gpt-4o", count_fn=lambda _: 100)
         ctx = InMemoryContextManager(system_prompt="sys", budget=calc)
@@ -260,7 +260,7 @@ class TestContextManagerWithBudget:
         assert result is None
 
     def test_token_usage_fallback_without_budget(self) -> None:
-        from coda.core.context import InMemoryContextManager
+        from krodo.core.context import InMemoryContextManager
 
         ctx = InMemoryContextManager(system_prompt="sys")
         ctx.add_user_input("hello world")
@@ -269,7 +269,7 @@ class TestContextManagerWithBudget:
         assert budget == 128_000
 
     def test_token_usage_with_count_fn_only(self) -> None:
-        from coda.core.context import InMemoryContextManager
+        from krodo.core.context import InMemoryContextManager
 
         ctx = InMemoryContextManager(
             system_prompt="sys",

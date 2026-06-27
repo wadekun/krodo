@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from rich.syntax import Syntax
 
-from coda.cli.diff_preview import _MAX_DIFF_LINES, render_diff, render_new_file
+from krodo.cli.diff_preview import _MAX_DIFF_LINES, render_diff, render_new_file
 
 
 class TestRenderDiff:

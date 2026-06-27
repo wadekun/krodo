@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from coda.core.workspace import LocalWorkspaceResolver
-from coda.sandbox.firewall import LocalSandboxRunner
-from coda.tools.builtin.shell import RunShellTool
-from coda.tools.protocols import ToolContext
+from krodo.core.workspace import LocalWorkspaceResolver
+from krodo.sandbox.firewall import LocalSandboxRunner
+from krodo.tools.builtin.shell import RunShellTool
+from krodo.tools.protocols import ToolContext
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -122,10 +122,10 @@ async def test_empty_command_error(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_python_script_execution(tmp_path: Path) -> None:
-    (tmp_path / "hello.py").write_text("print('Hello Coda')\n")
+    (tmp_path / "hello.py").write_text("print('Hello Krodo')\n")
     result = await RunShellTool().execute(
         {"command": f"{sys.executable} hello.py"},
         _ctx(tmp_path),
     )
     assert not result.is_error
-    assert "Hello Coda" in result.content
+    assert "Hello Krodo" in result.content

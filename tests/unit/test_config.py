@@ -1,4 +1,4 @@
-"""Unit tests for src/coda/core/config.py — config file loading (M5.4)."""
+"""Unit tests for src/krodo/core/config.py — config file loading (M5.4)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from coda.core.config import CodaConfig, load_config
+from krodo.core.config import KrodoConfig, load_config
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -31,8 +31,8 @@ def _write_toml(path: Path, content: str) -> None:
 
 class TestWorkspaceYaml:
     def test_loads_workspace_yaml(self, tmp_path: Path) -> None:
-        """Workspace .coda/config.yaml sets max_tokens."""
-        _write_yaml(tmp_path / ".coda" / "config.yaml", "max_tokens: 8000\n")
+        """Workspace .krodo/config.yaml sets max_tokens."""
+        _write_yaml(tmp_path / ".krodo" / "config.yaml", "max_tokens: 8000\n")
 
         with patch("pathlib.Path.home", return_value=tmp_path / "no-home"):
             cfg, sources = load_config(tmp_path)
@@ -42,7 +42,7 @@ class TestWorkspaceYaml:
 
     def test_workspace_yaml_sets_model(self, tmp_path: Path) -> None:
         _write_yaml(
-            tmp_path / ".coda" / "config.yaml",
+            tmp_path / ".krodo" / "config.yaml",
             "model: openai/gpt-4o\n",
         )
         with patch("pathlib.Path.home", return_value=tmp_path / "no-home"):
@@ -50,7 +50,7 @@ class TestWorkspaceYaml:
         assert cfg.model == "openai/gpt-4o"
 
     def test_workspace_yaml_sets_approval(self, tmp_path: Path) -> None:
-        _write_yaml(tmp_path / ".coda" / "config.yaml", "approval: full_auto\n")
+        _write_yaml(tmp_path / ".krodo" / "config.yaml", "approval: full_auto\n")
         with patch("pathlib.Path.home", return_value=tmp_path / "no-home"):
             cfg, _ = load_config(tmp_path)
         assert cfg.approval == "full_auto"
@@ -66,10 +66,10 @@ class TestUserToml:
         """Workspace YAML wins over user TOML for the same key."""
         home_dir = tmp_path / "fake-home"
         _write_toml(
-            home_dir / ".config" / "coda" / "config.toml",
+            home_dir / ".config" / "krodo" / "config.toml",
             'max_tokens = 4096\nmodel = "user-model"\n',
         )
-        _write_yaml(tmp_path / ".coda" / "config.yaml", "max_tokens: 8000\n")
+        _write_yaml(tmp_path / ".krodo" / "config.yaml", "max_tokens: 8000\n")
 
         with patch("pathlib.Path.home", return_value=home_dir):
             cfg, sources = load_config(tmp_path)
@@ -84,7 +84,7 @@ class TestUserToml:
         """User TOML is used when no workspace config exists."""
         home_dir = tmp_path / "fake-home"
         _write_toml(
-            home_dir / ".config" / "coda" / "config.toml",
+            home_dir / ".config" / "krodo" / "config.toml",
             'model = "toml-model"\n',
         )
         with patch("pathlib.Path.home", return_value=home_dir):
@@ -106,12 +106,12 @@ class TestMissingFiles:
         with patch("pathlib.Path.home", return_value=tmp_path / "no-home"):
             cfg, sources = load_config(tmp_path)
 
-        assert cfg == CodaConfig()
+        assert cfg == KrodoConfig()
         assert sources == []
 
     def test_empty_yaml_returns_empty_config(self, tmp_path: Path) -> None:
         """Empty YAML file → empty config (no error)."""
-        _write_yaml(tmp_path / ".coda" / "config.yaml", "")
+        _write_yaml(tmp_path / ".krodo" / "config.yaml", "")
         with patch("pathlib.Path.home", return_value=tmp_path / "no-home"):
             cfg, _ = load_config(tmp_path)
         assert cfg.model is None
@@ -128,12 +128,12 @@ class TestSchemaError:
     ) -> None:
         """Invalid YAML value logs a warning and returns empty config."""
         # approval must be one of the ApprovalMode literals
-        _write_yaml(tmp_path / ".coda" / "config.yaml", "approval: invalid_value\n")
+        _write_yaml(tmp_path / ".krodo" / "config.yaml", "approval: invalid_value\n")
 
         import logging  # noqa: PLC0415
 
         with patch("pathlib.Path.home", return_value=tmp_path / "no-home"):
-            with caplog.at_level(logging.WARNING, logger="coda.core.config"):
+            with caplog.at_level(logging.WARNING, logger="krodo.core.config"):
                 cfg, _ = load_config(tmp_path)
 
         assert cfg.approval is None  # schema error → field not set
@@ -143,14 +143,14 @@ class TestSchemaError:
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Syntactically invalid YAML logs a warning and returns empty config."""
-        _write_yaml(tmp_path / ".coda" / "config.yaml", ":::not yaml:::\n")
+        _write_yaml(tmp_path / ".krodo" / "config.yaml", ":::not yaml:::\n")
         import logging  # noqa: PLC0415
 
         with patch("pathlib.Path.home", return_value=tmp_path / "no-home"):
-            with caplog.at_level(logging.WARNING, logger="coda.core.config"):
+            with caplog.at_level(logging.WARNING, logger="krodo.core.config"):
                 cfg, _ = load_config(tmp_path)
 
-        assert cfg == CodaConfig()
+        assert cfg == KrodoConfig()
 
 
 # ---------------------------------------------------------------------------
@@ -161,8 +161,8 @@ class TestSchemaError:
 class TestSources:
     def test_sources_include_both_paths_when_both_present(self, tmp_path: Path) -> None:
         home_dir = tmp_path / "fake-home"
-        _write_toml(home_dir / ".config" / "coda" / "config.toml", "max_tokens = 1000\n")
-        _write_yaml(tmp_path / ".coda" / "config.yaml", "max_tokens: 2000\n")
+        _write_toml(home_dir / ".config" / "krodo" / "config.toml", "max_tokens = 1000\n")
+        _write_yaml(tmp_path / ".krodo" / "config.yaml", "max_tokens: 2000\n")
 
         with patch("pathlib.Path.home", return_value=home_dir):
             _, sources = load_config(tmp_path)

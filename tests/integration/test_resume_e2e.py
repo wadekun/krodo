@@ -1,4 +1,4 @@
-"""Integration tests for coda resume subcommand (M5.2)."""
+"""Integration tests for krodo resume subcommand (M5.2)."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from coda.cli.main import app
-from coda.core.types import LLMChunk, Message, ToolDef
-from coda.memory.store import JsonlSessionStore
+from krodo.cli.main import app
+from krodo.core.types import LLMChunk, Message, ToolDef
+from krodo.memory.store import JsonlSessionStore
 
 # ---------------------------------------------------------------------------
 # Helpers (mirrors test_cli_e2e.py)
@@ -54,7 +54,7 @@ class _FakeLLMProvider:
 
 
 def _patch_provider(provider: _FakeLLMProvider):  # type: ignore[no-untyped-def]
-    return patch("coda.cli.main.LiteLLMProvider", return_value=provider)
+    return patch("krodo.cli.main.LiteLLMProvider", return_value=provider)
 
 
 # ---------------------------------------------------------------------------
@@ -76,14 +76,14 @@ def test_resume_continues_conversation(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
 
     # Find the session that was created
-    sessions_dir = tmp_path / ".coda" / "sessions"
+    sessions_dir = tmp_path / ".krodo" / "sessions"
     session_files = list(sessions_dir.glob("*.jsonl"))
     assert len(session_files) == 1
     session_id = session_files[0].stem
 
     # Session 2: resume the session
     # Mock input to provide one user turn then exit
-    from coda.cli.resume import resume_command  # noqa: PLC0415
+    from krodo.cli.resume import resume_command  # noqa: PLC0415
 
     provider2 = _FakeLLMProvider([Message(role="assistant", content="Hello from session 2")])
 
@@ -93,7 +93,7 @@ def test_resume_continues_conversation(tmp_path: Path) -> None:
         call_args_capture.append(list(messages))
         return Message(role="assistant", content="Resume reply")
 
-    with patch("coda.cli.main.LiteLLMProvider") as mock_prov:
+    with patch("krodo.cli.main.LiteLLMProvider") as mock_prov:
         instance = mock_prov.return_value
         instance.chat = _fake_chat
         instance.stream_chat = provider2.stream_chat
@@ -127,11 +127,11 @@ def test_resume_continues_conversation(tmp_path: Path) -> None:
 def test_resume_with_explicit_id(tmp_path: Path) -> None:
     """Two sessions exist; resume the older one by explicit ID."""
 
-    store = JsonlSessionStore(tmp_path / ".coda" / "sessions")
+    store = JsonlSessionStore(tmp_path / ".krodo" / "sessions")
     store.create_session("session-aaa", model="test", agents_md_hash=None, initial_prompt_hash=None)
     store.create_session("session-bbb", model="test", agents_md_hash=None, initial_prompt_hash=None)
 
-    from coda.cli.resume import _resolve_session_id  # noqa: PLC0415
+    from krodo.cli.resume import _resolve_session_id  # noqa: PLC0415
 
     resolved = _resolve_session_id(store, "session-aaa")
     assert resolved == "session-aaa"
@@ -143,10 +143,10 @@ def test_resume_with_explicit_id(tmp_path: Path) -> None:
 def test_resolve_session_id_prefix_match(tmp_path: Path) -> None:
     """Prefix match resolves to full ID when unambiguous."""
 
-    store = JsonlSessionStore(tmp_path / ".coda" / "sessions")
+    store = JsonlSessionStore(tmp_path / ".krodo" / "sessions")
     store.create_session("abcdef12", model="test", agents_md_hash=None, initial_prompt_hash=None)
 
-    from coda.cli.resume import _resolve_session_id  # noqa: PLC0415
+    from krodo.cli.resume import _resolve_session_id  # noqa: PLC0415
 
     resolved = _resolve_session_id(store, "abcd")
     assert resolved == "abcdef12"
@@ -155,14 +155,14 @@ def test_resolve_session_id_prefix_match(tmp_path: Path) -> None:
 def test_resolve_session_id_none_returns_most_recent(tmp_path: Path) -> None:
     """No session_id → returns most recent."""
 
-    store = JsonlSessionStore(tmp_path / ".coda" / "sessions")
+    store = JsonlSessionStore(tmp_path / ".krodo" / "sessions")
     store.create_session("session-old", model="test", agents_md_hash=None, initial_prompt_hash=None)
     import time  # noqa: PLC0415
 
     time.sleep(0.01)
     store.create_session("session-new", model="test", agents_md_hash=None, initial_prompt_hash=None)
 
-    from coda.cli.resume import _resolve_session_id  # noqa: PLC0415
+    from krodo.cli.resume import _resolve_session_id  # noqa: PLC0415
 
     resolved = _resolve_session_id(store, None)
     assert resolved == "session-new"
@@ -174,9 +174,9 @@ def test_resolve_session_id_none_returns_most_recent(tmp_path: Path) -> None:
 
 
 def test_resume_list_flag_prints_recent(tmp_path: Path) -> None:
-    """coda resume --list prints recent sessions without starting REPL."""
+    """krodo resume --list prints recent sessions without starting REPL."""
 
-    store = JsonlSessionStore(tmp_path / ".coda" / "sessions")
+    store = JsonlSessionStore(tmp_path / ".krodo" / "sessions")
     for sid in ["s1", "s2", "s3"]:
         store.create_session(sid, model="test-model", agents_md_hash=None, initial_prompt_hash=None)
 
@@ -184,7 +184,7 @@ def test_resume_list_flag_prints_recent(tmp_path: Path) -> None:
 
     import typer  # noqa: PLC0415
 
-    from coda.cli.resume import resume_command  # noqa: PLC0415
+    from krodo.cli.resume import resume_command  # noqa: PLC0415
 
     with pytest.raises(typer.Exit) as exc_info:
         resume_command(
@@ -199,7 +199,7 @@ def test_resume_list_empty_workspace(tmp_path: Path) -> None:
     """--list with no sessions prints a helpful message and exits 0."""
     import typer  # noqa: PLC0415
 
-    from coda.cli.resume import resume_command  # noqa: PLC0415
+    from krodo.cli.resume import resume_command  # noqa: PLC0415
 
     with pytest.raises(typer.Exit) as exc_info:
         resume_command(
@@ -214,7 +214,7 @@ def test_resume_unknown_session_exits_1(tmp_path: Path) -> None:
     """Requesting a non-existent session ID exits with code 1."""
     import typer  # noqa: PLC0415
 
-    from coda.cli.resume import resume_command  # noqa: PLC0415
+    from krodo.cli.resume import resume_command  # noqa: PLC0415
 
     with pytest.raises(typer.Exit) as exc_info:
         resume_command(

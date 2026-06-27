@@ -12,10 +12,10 @@ from pathlib import Path
 import git as gitpython
 import pytest
 
-from coda.core.workspace import LocalWorkspaceResolver
-from coda.sandbox.firewall import LocalSandboxRunner
-from coda.tools.builtin.git import GitCommitTool, GitDiffTool, GitStatusTool, _redact_secrets
-from coda.tools.protocols import ToolContext
+from krodo.core.workspace import LocalWorkspaceResolver
+from krodo.sandbox.firewall import LocalSandboxRunner
+from krodo.tools.builtin.git import GitCommitTool, GitDiffTool, GitStatusTool, _redact_secrets
+from krodo.tools.protocols import ToolContext
 
 # ---------------------------------------------------------------------------
 # Fixtures

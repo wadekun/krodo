@@ -1,7 +1,7 @@
 """Integration tests for the M6.3 pipe-stdin entry.
 
-`echo task | coda` must run headless with the piped text as the prompt;
-`git diff | coda "review"` must append the piped text as a <stdin> context
+`echo task | krodo` must run headless with the piped text as the prompt;
+`git diff | krodo "review"` must append the piped text as a <stdin> context
 block; empty piped stdin keeps the REPL behaviour unchanged.
 """
 
@@ -13,8 +13,8 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from coda.cli.main import app
-from coda.core.types import Message, ToolDef
+from krodo.cli.main import app
+from krodo.core.types import Message, ToolDef
 
 
 class _RecordingProvider:
@@ -43,11 +43,11 @@ class _RecordingProvider:
 
 
 def test_piped_stdin_without_prompt_runs_headless(tmp_path: Path) -> None:
-    """`echo "do the task" | coda` → headless run with the piped prompt."""
+    """`echo "do the task" | krodo` → headless run with the piped prompt."""
     provider = _RecordingProvider()
     runner = CliRunner()
 
-    with patch("coda.cli.main.LiteLLMProvider", return_value=provider):
+    with patch("krodo.cli.main.LiteLLMProvider", return_value=provider):
         result = runner.invoke(
             app,
             ["--root", str(tmp_path), "--approval", "full_auto"],
@@ -64,11 +64,11 @@ def test_piped_stdin_without_prompt_runs_headless(tmp_path: Path) -> None:
 
 
 def test_piped_stdin_with_prompt_becomes_context(tmp_path: Path) -> None:
-    """`git diff | coda "review this"` → prompt + <stdin> block."""
+    """`git diff | krodo "review this"` → prompt + <stdin> block."""
     provider = _RecordingProvider()
     runner = CliRunner()
 
-    with patch("coda.cli.main.LiteLLMProvider", return_value=provider):
+    with patch("krodo.cli.main.LiteLLMProvider", return_value=provider):
         result = runner.invoke(
             app,
             ["--root", str(tmp_path), "--approval", "full_auto", "review this"],
@@ -93,7 +93,7 @@ def test_empty_piped_stdin_enters_repl(tmp_path: Path) -> None:
         raise EOFError
 
     with (
-        patch("coda.cli.main.LiteLLMProvider", return_value=provider),
+        patch("krodo.cli.main.LiteLLMProvider", return_value=provider),
         patch("builtins.input", _raise_eof),
     ):
         result = runner.invoke(app, ["--root", str(tmp_path), "--approval", "full_auto"])

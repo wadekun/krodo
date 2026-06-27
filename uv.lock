@@ -285,67 +285,6 @@ wheels = [
 ]
 
 [[package]]
-name = "coda"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "gitpython" },
-    { name = "httpx" },
-    { name = "keyring" },
-    { name = "litellm" },
-    { name = "pathspec" },
-    { name = "prompt-toolkit" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "rich" },
-    { name = "structlog" },
-    { name = "tiktoken" },
-    { name = "typer" },
-    { name = "unidiff" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "pytest-mock" },
-    { name = "ruff" },
-    { name = "types-pyyaml" },
-    { name = "vcrpy" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "gitpython", specifier = ">=3.1,<4" },
-    { name = "httpx", specifier = ">=0.27,<1" },
-    { name = "keyring", specifier = ">=25,<26" },
-    { name = "litellm", specifier = ">=1.40,<2" },
-    { name = "pathspec", specifier = ">=0.12,<1" },
-    { name = "prompt-toolkit", specifier = ">=3.0,<4" },
-    { name = "pydantic", specifier = ">=2.7,<3" },
-    { name = "pydantic-settings", specifier = ">=2.2,<3" },
-    { name = "rich", specifier = ">=13,<14" },
-    { name = "structlog", specifier = ">=24,<25" },
-    { name = "tiktoken", specifier = ">=0.7,<1" },
-    { name = "typer", specifier = ">=0.12,<1" },
-    { name = "unidiff", specifier = ">=0.7,<1" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "mypy", specifier = ">=1.10" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "pytest-asyncio", specifier = ">=0.23" },
-    { name = "pytest-cov", specifier = ">=5" },
-    { name = "pytest-mock", specifier = ">=3" },
-    { name = "ruff", specifier = ">=0.5" },
-    { name = "types-pyyaml", specifier = ">=6.0.12.20260518" },
-    { name = "vcrpy", specifier = ">=6" },
-]
-
-[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -946,6 +885,67 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/43/4b/674af6ef2f97d56f0ab5153bf0bfa28ccb6c3ed4d1babf4305449668807b/keyring-25.7.0.tar.gz", hash = "sha256:fe01bd85eb3f8fb3dd0405defdeac9a5b4f6f0439edbb3149577f244a2e8245b", size = 63516 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/81/db/e655086b7f3a705df045bf0933bdd9c2f79bb3c97bfef1384598bb79a217/keyring-25.7.0-py3-none-any.whl", hash = "sha256:be4a0b195f149690c166e850609a477c532ddbfbaed96a404d4e43f8d5e2689f", size = 39160 },
+]
+
+[[package]]
+name = "krodo"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "gitpython" },
+    { name = "httpx" },
+    { name = "keyring" },
+    { name = "litellm" },
+    { name = "pathspec" },
+    { name = "prompt-toolkit" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "rich" },
+    { name = "structlog" },
+    { name = "tiktoken" },
+    { name = "typer" },
+    { name = "unidiff" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "pytest-mock" },
+    { name = "ruff" },
+    { name = "types-pyyaml" },
+    { name = "vcrpy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gitpython", specifier = ">=3.1,<4" },
+    { name = "httpx", specifier = ">=0.27,<1" },
+    { name = "keyring", specifier = ">=25,<26" },
+    { name = "litellm", specifier = ">=1.40,<2" },
+    { name = "pathspec", specifier = ">=0.12,<1" },
+    { name = "prompt-toolkit", specifier = ">=3.0,<4" },
+    { name = "pydantic", specifier = ">=2.7,<3" },
+    { name = "pydantic-settings", specifier = ">=2.2,<3" },
+    { name = "rich", specifier = ">=13,<14" },
+    { name = "structlog", specifier = ">=24,<25" },
+    { name = "tiktoken", specifier = ">=0.7,<1" },
+    { name = "typer", specifier = ">=0.12,<1" },
+    { name = "unidiff", specifier = ">=0.7,<1" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.10" },
+    { name = "pytest", specifier = ">=8" },
+    { name = "pytest-asyncio", specifier = ">=0.23" },
+    { name = "pytest-cov", specifier = ">=5" },
+    { name = "pytest-mock", specifier = ">=3" },
+    { name = "ruff", specifier = ">=0.5" },
+    { name = "types-pyyaml", specifier = ">=6.0.12.20260518" },
+    { name = "vcrpy", specifier = ">=6" },
 ]
 
 [[package]]

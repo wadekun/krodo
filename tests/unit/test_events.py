@@ -1,4 +1,4 @@
-"""Unit tests for src/coda/core/events.py — SessionEventLogger."""
+"""Unit tests for src/krodo/core/events.py — SessionEventLogger."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from coda.core.events import SessionEventLogger
-from coda.core.types import SessionEvent, SessionEventType
+from krodo.core.events import SessionEventLogger
+from krodo.core.types import SessionEvent, SessionEventType
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -207,14 +207,14 @@ class TestEmitFrom:
 
 class TestFromWorkspacePath:
     def test_creates_logger_with_correct_path(self, tmp_path: Path) -> None:
-        """from_workspace_path now points at .coda/sessions/ (M5.1 migration)."""
+        """from_workspace_path now points at .krodo/sessions/ (M5.1 migration)."""
         logger = SessionEventLogger.from_workspace_path("abc123", tmp_path)
-        assert logger._jsonl_path == tmp_path / ".coda" / "sessions" / "abc123.jsonl"
+        assert logger._jsonl_path == tmp_path / ".krodo" / "sessions" / "abc123.jsonl"
 
     def test_emits_to_workspace_path(self, tmp_path: Path) -> None:
         logger = SessionEventLogger.from_workspace_path("sess-42", tmp_path)
         logger.emit(SessionEventType.USER_MESSAGE, data={"content": "hi"})
-        expected_path = tmp_path / ".coda" / "sessions" / "sess-42.jsonl"
+        expected_path = tmp_path / ".krodo" / "sessions" / "sess-42.jsonl"
         assert expected_path.exists()
 
     def test_session_id_property(self, tmp_path: Path) -> None:

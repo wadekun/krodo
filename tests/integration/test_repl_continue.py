@@ -16,8 +16,8 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from coda.cli.main import app
-from coda.core.types import Message, ToolCall, ToolDef
+from krodo.cli.main import app
+from krodo.core.types import Message, ToolCall, ToolDef
 
 
 class _ScriptedProvider:
@@ -64,7 +64,7 @@ def _script_inputs(seq: list[str]):  # type: ignore[no-untyped-def]
 
 
 def _patch_provider(provider: _ScriptedProvider):  # type: ignore[no-untyped-def]
-    return patch("coda.cli.main.LiteLLMProvider", return_value=provider)
+    return patch("krodo.cli.main.LiteLLMProvider", return_value=provider)
 
 
 def _two_call_batch() -> Message:

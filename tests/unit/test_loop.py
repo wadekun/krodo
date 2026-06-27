@@ -10,9 +10,9 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from coda.core.context import InMemoryContextManager
-from coda.core.loop import AgentLoop, LoopConfig, render_system_prompt
-from coda.core.types import (
+from krodo.core.context import InMemoryContextManager
+from krodo.core.loop import AgentLoop, LoopConfig, render_system_prompt
+from krodo.core.types import (
     Decision,
     LLMChunk,
     Message,
@@ -20,10 +20,10 @@ from coda.core.types import (
     ToolDef,
     ToolResult,
 )
-from coda.core.workspace import LocalWorkspaceResolver
-from coda.sandbox.firewall import LocalSandboxRunner
-from coda.tools.protocols import ToolContext
-from coda.tools.registry import ToolRegistry
+from krodo.core.workspace import LocalWorkspaceResolver
+from krodo.sandbox.firewall import LocalSandboxRunner
+from krodo.tools.protocols import ToolContext
+from krodo.tools.registry import ToolRegistry
 
 # ---------------------------------------------------------------------------
 # Helpers / fakes
@@ -521,18 +521,18 @@ def test_context_user_input_persists_in_history() -> None:
     test_loop_preserves_user_message_across_tool_call.
     """
     ctx = InMemoryContextManager(system_prompt="sys")
-    ctx.add_user_input("hello coda")
+    ctx.add_user_input("hello krodo")
 
     # history property must include the user message
     assert len(ctx.history) == 1
     assert ctx.history[0].role == "user"
-    assert ctx.history[0].content == "hello coda"
+    assert ctx.history[0].content == "hello krodo"
 
     # build_messages() must also include it (second call — simulates loop rebuild)
     msgs = ctx.build_messages()
     user_in_msgs = [m for m in msgs if m.role == "user"]
     assert user_in_msgs, "build_messages() must include the user message"
-    assert user_in_msgs[0].content == "hello coda"
+    assert user_in_msgs[0].content == "hello krodo"
 
     # Calling build_messages() again must not duplicate entries (pure read)
     msgs2 = ctx.build_messages()
@@ -680,7 +680,7 @@ async def test_abort_reason_stall(tmp_path: Path) -> None:
     )
 
     # Patch StallDetector to treat 'echo' as a write tool for this test
-    from coda.core import recovery as _recovery  # noqa: PLC0415
+    from krodo.core import recovery as _recovery  # noqa: PLC0415
 
     original = _recovery._WRITE_TOOLS
     _recovery._WRITE_TOOLS = frozenset({"echo"})

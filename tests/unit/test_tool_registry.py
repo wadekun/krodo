@@ -8,11 +8,11 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from coda.core.types import ToolDef, ToolResult
-from coda.core.workspace import LocalWorkspaceResolver
-from coda.sandbox.firewall import LocalSandboxRunner
-from coda.tools.protocols import Tool, ToolContext
-from coda.tools.registry import ToolRegistry
+from krodo.core.types import ToolDef, ToolResult
+from krodo.core.workspace import LocalWorkspaceResolver
+from krodo.sandbox.firewall import LocalSandboxRunner
+from krodo.tools.protocols import Tool, ToolContext
+from krodo.tools.registry import ToolRegistry
 
 
 class EchoParams(BaseModel):

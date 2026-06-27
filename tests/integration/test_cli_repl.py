@@ -1,6 +1,6 @@
 """Integration tests for the M4.9 interactive REPL.
 
-Drives `coda` (no prompt argument) through Typer's CliRunner with a scripted
+Drives `krodo` (no prompt argument) through Typer's CliRunner with a scripted
 `input()` so we can exercise the multi-turn loop without a real TTY.
 
 The tests focus on REPL-specific contracts (history persistence, exit
@@ -17,8 +17,8 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from coda.cli.main import app
-from coda.core.types import LLMChunk, Message, ToolDef
+from krodo.cli.main import app
+from krodo.core.types import LLMChunk, Message, ToolDef
 
 
 class _ScriptedProvider:
@@ -83,7 +83,7 @@ def _script_inputs(seq: list[str]):  # type: ignore[no-untyped-def]
 
 
 def _make_provider_patcher(provider: _ScriptedProvider):  # type: ignore[no-untyped-def]
-    return patch("coda.cli.main.LiteLLMProvider", return_value=provider)
+    return patch("krodo.cli.main.LiteLLMProvider", return_value=provider)
 
 
 def test_repl_multi_turn_preserves_history(tmp_path: Path) -> None:
@@ -211,7 +211,7 @@ def test_repl_no_prompt_does_not_print_help(tmp_path: Path) -> None:
         result = runner.invoke(app, ["--root", str(tmp_path), "--approval", "full_auto"])
 
     assert result.exit_code == 0, result.output
-    # The old behaviour printed `Usage: coda [OPTIONS] [PROMPT]`.  That line
+    # The old behaviour printed `Usage: krodo [OPTIONS] [PROMPT]`.  That line
     # must NOT appear when entering REPL mode.
     assert "Usage:" not in result.output
     assert "REPL mode" in result.output
@@ -256,7 +256,7 @@ def test_repl_tty_path_uses_prompt_toolkit(tmp_path: Path) -> None:
     with (
         _make_provider_patcher(provider),
         # Make the REPL believe stdin is a TTY so it takes the prompt_toolkit branch.
-        patch("coda.cli.repl.sys") as mock_sys,
+        patch("krodo.cli.repl.sys") as mock_sys,
         patch.object(PromptSession, "prompt_async", new=_fake_prompt_async),
     ):
         mock_sys.stdin.isatty.return_value = True

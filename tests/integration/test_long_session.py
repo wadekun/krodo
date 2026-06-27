@@ -26,15 +26,15 @@ from typing import Any
 
 import pytest
 
-from coda.core.budget import BudgetCalculator
-from coda.core.compression import AlgorithmicCompressor
-from coda.core.context import InMemoryContextManager
-from coda.core.loop import AgentLoop, LoopConfig
-from coda.core.types import LLMChunk, Message, ToolDef
-from coda.core.workspace import LocalWorkspaceResolver
-from coda.sandbox.firewall import LocalSandboxRunner
-from coda.tools.protocols import ToolContext
-from coda.tools.registry import ToolRegistry
+from krodo.core.budget import BudgetCalculator
+from krodo.core.compression import AlgorithmicCompressor
+from krodo.core.context import InMemoryContextManager
+from krodo.core.loop import AgentLoop, LoopConfig
+from krodo.core.types import LLMChunk, Message, ToolDef
+from krodo.core.workspace import LocalWorkspaceResolver
+from krodo.sandbox.firewall import LocalSandboxRunner
+from krodo.tools.protocols import ToolContext
+from krodo.tools.registry import ToolRegistry
 
 # ---------------------------------------------------------------------------
 # Minimal mock LLM provider

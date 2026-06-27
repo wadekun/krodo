@@ -1,13 +1,13 @@
-"""Unit tests for src/coda/memory/replay.py — session event replay (M5.2)."""
+"""Unit tests for src/krodo/memory/replay.py — session event replay (M5.2)."""
 
 from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
 
-from coda.core.context import InMemoryContextManager
-from coda.core.types import SessionEvent, SessionEventType
-from coda.memory.replay import replay_events
+from krodo.core.context import InMemoryContextManager
+from krodo.core.types import SessionEvent, SessionEventType
+from krodo.memory.replay import replay_events
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -1,16 +1,16 @@
-# Coda
+# Krodo
 
 > A local-first, multi-provider **coding agent CLI**, built with Python 3.12+.
 >
 > Status: 🚧 **Pre-alpha (v0.1.0)** — actively in Phase 1 development. Not yet ready for general use.
 
-Coda is an open-source coding agent inspired by Claude Code, Codex CLI, and Aider. It runs locally, talks to your codebase through tools (read / edit / shell / git / grep), and supports any LLM provider via [LiteLLM](https://github.com/BerriAI/litellm) — Anthropic, OpenAI, Gemini, DeepSeek, Qwen, plus local models via Ollama / vLLM.
+Krodo is an open-source coding agent inspired by Claude Code, Codex CLI, and Aider. It runs locally, talks to your codebase through tools (read / edit / shell / git / grep), and supports any LLM provider via [LiteLLM](https://github.com/BerriAI/litellm) — Anthropic, OpenAI, Gemini, DeepSeek, Qwen, plus local models via Ollama / vLLM.
 
 ## Why another coding agent
 
 - **Local-first**: your code never leaves your machine except for LLM API calls.
 - **Multi-provider from day 1**: switch between Claude, GPT, Gemini, DeepSeek, Qwen, or local models with a single config flag.
-- **Three CLI shapes, one core**: `coda` REPL, `coda exec` headless, `coda tui` (Phase 2) — all share the same agent loop.
+- **Three CLI shapes, one core**: `krodo` REPL, `krodo exec` headless, `krodo tui` (Phase 2) — all share the same agent loop.
 - **Safety as a default**: three approval modes (`read_only` / `auto_edit` / `full_auto`), path firewall, dangerous-command blocklist, automatic git checkpoint before every write.
 - **Modular monolith**: clean Protocol-based interfaces between `core` / `llm` / `tools` / `sandbox` / `memory` / `obs`. Easy to read, easy to contribute to.
 
@@ -24,8 +24,8 @@ For full design rationale, see [`docs/architecture.md`](docs/architecture.md).
 | 1 M1 | Walking skeleton (3 tools, CLI, agent loop) | ✅ done |
 | 1 M2 | Full tools (11 tools) + three approval modes + pattern trust | ✅ done |
 | 1 M3 | Context management (token budget + dual compression) + 7 recovery scenarios | ✅ done |
-| 1 M4 | `.codaignore` + git checkpoint + `coda undo` + diff preview | ✅ done |
-| 1 M5 | Persistence + memory: JSONL sessions, `coda resume`, AGENTS.md, config files | ✅ done |
+| 1 M4 | `.krodoignore` + git checkpoint + `krodo undo` + diff preview | ✅ done |
+| 1 M5 | Persistence + memory: JSONL sessions, `krodo resume`, AGENTS.md, config files | ✅ done |
 | 2 | tree-sitter symbol index, repo-map, Textual TUI, MCP client | — |
 | 3 | OS-level sandbox, evaluation harness, OpenTelemetry / Langfuse | — |
 | 4 | Production-grade: Rust hot paths, single-binary distribution, LiteLLM Proxy | — |
@@ -35,29 +35,29 @@ For full design rationale, see [`docs/architecture.md`](docs/architecture.md).
 ### Try the M6 release (Phase 1 feature-complete)
 
 ```bash
-git clone https://github.com/<org>/coda
-cd coda
+git clone https://github.com/<org>/krodo
+cd krodo
 uv sync
 
-export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY / CODA_API_KEY
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY / KRODO_API_KEY
 
-mkdir -p /tmp/coda-sandbox
+mkdir -p /tmp/krodo-sandbox
 
 # Headless: run one task and exit
-uv run coda --root /tmp/coda-sandbox "create hello.py that prints Hello Coda, then run it"
+uv run krodo --root /tmp/krodo-sandbox "create hello.py that prints Hello Krodo, then run it"
 
 # REPL: omit the prompt to enter interactive multi-turn mode
-uv run coda --root /tmp/coda-sandbox
+uv run krodo --root /tmp/krodo-sandbox
 # you> create a simple mario game
 # (assistant works, then…)
 # you> now add a sound effect when collecting coins
 # you> exit          # or Ctrl-D / Ctrl-C twice
 
 # Pipe (M6): stdin becomes the prompt…
-echo "create hello.py that prints Hello Coda" | uv run coda --root /tmp/coda-sandbox
+echo "create hello.py that prints Hello Krodo" | uv run krodo --root /tmp/krodo-sandbox
 
 # …or extra context when a prompt is given
-git diff | uv run coda "review this change for bugs"
+git diff | uv run krodo "review this change for bugs"
 ```
 
 Assistant text **streams token-by-token** (M6.1), and every session summary ends with a
@@ -87,23 +87,23 @@ Sessions are persisted automatically. You can pick up right where you left off:
 
 ```bash
 # List recent sessions
-coda resume --list
+krodo resume --list
 
 # Resume by session ID (or unique prefix)
-coda resume a3f2b1
+krodo resume a3f2b1
 
 # Resume in a specific workspace
-coda resume --root /tmp/coda-sandbox a3f2b1
+krodo resume --root /tmp/krodo-sandbox a3f2b1
 ```
 
-`coda resume` replays the stored conversation history into a fresh REPL, so the model
+`krodo resume` replays the stored conversation history into a fresh REPL, so the model
 remembers everything from the prior session — files edited, tools called, and dialogue.
 
 ### Stable release (v0.1 — not yet published)
 
 ```bash
-pipx install coda
-coda --help
+pipx install krodo
+krodo --help
 ```
 
 ## Available tools (M2, 11 total)
@@ -139,7 +139,7 @@ Truncate at    = 95% of budget
 
 ### Compression strategies
 
-Select via `CODA_COMPRESS` environment variable:
+Select via `KRODO_COMPRESS` environment variable:
 
 | Strategy | Env value | Description |
 |:---------|:----------|:------------|
@@ -148,10 +148,10 @@ Select via `CODA_COMPRESS` environment variable:
 
 ```bash
 # Use algorithmic compression (no extra LLM calls):
-CODA_COMPRESS=algorithmic uv run coda "..."
+KRODO_COMPRESS=algorithmic uv run krodo "..."
 
 # Override the token ratio for Claude (default 1.1x, tiktoken undercounts):
-CODA_TOKEN_RATIO=1.15 uv run coda --model anthropic/claude-3-5-sonnet "..."
+KRODO_TOKEN_RATIO=1.15 uv run krodo --model anthropic/claude-3-5-sonnet "..."
 ```
 
 ### Error recovery (7 scenarios, §7.5)
@@ -170,27 +170,27 @@ CODA_TOKEN_RATIO=1.15 uv run coda --model anthropic/claude-3-5-sonnet "..."
 
 ```bash
 # Limit tool calls per turn (default 25):
-uv run coda --max-tool-calls 5 "..."
+uv run krodo --max-tool-calls 5 "..."
 
 # Set compression window (how many dialogue rounds to compress at once):
-uv run coda --summary-window 3 "..."
+uv run krodo --summary-window 3 "..."
 ```
 
 ## Persistence & Memory (M5)
 
 ### Session storage
 
-Every session is automatically saved to `.coda/sessions/<session_id>.jsonl` in your workspace. Each line is a JSON event (`USER_MESSAGE`, `ASSISTANT_MESSAGE`, `TOOL_CALL`, `TOOL_RESULT`, `COMPRESSION`, etc.) with a monotonic `seq` number so multi-process appends are safe.
+Every session is automatically saved to `.krodo/sessions/<session_id>.jsonl` in your workspace. Each line is a JSON event (`USER_MESSAGE`, `ASSISTANT_MESSAGE`, `TOOL_CALL`, `TOOL_RESULT`, `COMPRESSION`, etc.) with a monotonic `seq` number so multi-process appends are safe.
 
-Application logs go to `.coda/logs/<session_id>.log` (pure `structlog` JSONL — separate from session events).
+Application logs go to `.krodo/logs/<session_id>.log` (pure `structlog` JSONL — separate from session events).
 
 ### AGENTS.md — project memory
 
-Place an `AGENTS.md` file anywhere in your project and Coda will inject it automatically into every session as `<project_memory>`:
+Place an `AGENTS.md` file anywhere in your project and Krodo will inject it automatically into every session as `<project_memory>`:
 
 | Tier | Location | Purpose |
 |------|----------|---------|
-| System | `~/.config/coda/AGENTS.md` | Personal conventions (applies to all workspaces) |
+| System | `~/.config/krodo/AGENTS.md` | Personal conventions (applies to all workspaces) |
 | Project | `<workspace>/AGENTS.md` | Project-specific rules (always included, never dropped) |
 | Subdir | `<cwd>/AGENTS.md` … up to workspace root | Contextual docs for the directory you're working in |
 
@@ -198,46 +198,46 @@ Each file is limited to 8K tokens; total budget is 12K tokens (subdirectory file
 
 ### Configuration files (M5.4)
 
-Set defaults in `.coda/config.yaml` (workspace) or `~/.config/coda/config.toml` (user-global):
+Set defaults in `.krodo/config.yaml` (workspace) or `~/.config/krodo/config.toml` (user-global):
 
 ```yaml
-# .coda/config.yaml — workspace-level defaults
+# .krodo/config.yaml — workspace-level defaults
 model: anthropic/claude-3-5-sonnet-20241022
 approval: auto_edit
 max_tool_calls: 20
 ```
 
 ```toml
-# ~/.config/coda/config.toml — user-level defaults (TOML format)
+# ~/.config/krodo/config.toml — user-level defaults (TOML format)
 model = "openai/gpt-4o"
 approval = "full_auto"
 ```
 
-Precedence (highest → lowest): CLI flag > environment variable > `.coda/config.yaml` > `~/.config/coda/config.toml` > built-in default.
+Precedence (highest → lowest): CLI flag > environment variable > `.krodo/config.yaml` > `~/.config/krodo/config.toml` > built-in default.
 
-Run `coda doctor` to see which config files are active and what values they contribute.
+Run `krodo doctor` to see which config files are active and what values they contribute.
 
-## .codaignore & Git checkpoint (M4)
+## .krodoignore & Git checkpoint (M4)
 
 M4 adds two safety nets: a 4-tier ignore system and automatic git checkpointing before every write.
 
-### .codaignore — 4-tier path filtering (§5.3)
+### .krodoignore — 4-tier path filtering (§5.3)
 
-Every `read_file`, `list_dir`, `glob`, and `grep` call passes through `CodaIgnore` before touching the disk.  Rules are merged from four sources in increasing specificity order:
+Every `read_file`, `list_dir`, `glob`, and `grep` call passes through `KrodoIgnore` before touching the disk.  Rules are merged from four sources in increasing specificity order:
 
 | Tier | Source | Overridable? |
 |------|--------|-------------|
 | 1 | Hard-coded defaults (`.env`, `*.pem`, `id_rsa`, `node_modules/`, etc.) | ❌ always active |
 | 2 | Project `.gitignore` | — |
-| 3 | Project `.codaignore` (workspace root) | adds custom patterns |
-| 4 | User-level `~/.config/coda/codaignore` | personal overrides |
+| 3 | Project `.krodoignore` (workspace root) | adds custom patterns |
+| 4 | User-level `~/.config/krodo/krodoignore` | personal overrides |
 
 When a path matches any rule, the tool returns:
 ```
 PathIgnoredError: '<path>' is ignored (rule: '<pattern>' from <source>)
 ```
 
-#### Example `.codaignore`
+#### Example `.krodoignore`
 
 ```gitignore
 # Exclude internal data directories from agent reads
@@ -250,26 +250,26 @@ tests/fixtures/generated/
 
 ### Git checkpoint (§5.4)
 
-Before every write (`write_file`, `edit_file`, `apply_patch`) and write-heuristic shell command, Coda creates a lightweight `git stash create` checkpoint:
+Before every write (`write_file`, `edit_file`, `apply_patch`) and write-heuristic shell command, Krodo creates a lightweight `git stash create` checkpoint:
 
 1. Collect affected paths.
 2. `checkpoint_sha = git stash create` — does **not** push to the stash stack; working tree is untouched.
-3. Emit a `CHECKPOINT` `SessionEvent` to `.coda/logs/<session>.jsonl`.
+3. Emit a `CHECKPOINT` `SessionEvent` to `.krodo/logs/<session>.jsonl`.
 4. Execute the write.
 
 On non-git workspaces, checkpointing degrades to a no-op (warning logged; writes proceed normally).
 
-### coda undo
+### krodo undo
 
 ```bash
 # Undo the last checkpoint in the most recent session:
-coda undo [--root <workspace>]
+krodo undo [--root <workspace>]
 
 # Undo a specific session:
-coda undo --session <session_id> [--root <workspace>]
+krodo undo --session <session_id> [--root <workspace>]
 ```
 
-`coda undo` reads the session JSONL, finds the most recent `CHECKPOINT` event, and runs `git checkout <sha> -- <affected_paths>` to restore only those paths.  Other files are untouched.
+`krodo undo` reads the session JSONL, finds the most recent `CHECKPOINT` event, and runs `git checkout <sha> -- <affected_paths>` to restore only those paths.  Other files are untouched.
 
 | Condition | Behaviour |
 |-----------|-----------|
@@ -279,18 +279,18 @@ coda undo --session <session_id> [--root <workspace>]
 
 ## CLI subcommand semantics
 
-Coda has three named subcommands — `resume`, `undo`, and `doctor` — alongside a free-form headless prompt. The parser resolves the two as follows:
+Krodo has three named subcommands — `resume`, `undo`, and `doctor` — alongside a free-form headless prompt. The parser resolves the two as follows:
 
 | Invocation | Behaviour |
 |---|---|
-| `coda "create a mario game"` | Headless — prompt is `"create a mario game"` |
-| `coda` | Interactive REPL |
-| `coda resume` | Resume subcommand (most recent session) |
-| `coda resume abc123` | Resume subcommand with session ID `abc123` |
-| `coda resume --root /path` | Resume subcommand; `--root` goes to `resume` |
-| `coda --root /path resume` | Resume subcommand; global `--root` inherited as default |
-| `coda undo` | Undo subcommand |
-| `coda doctor` | Doctor subcommand |
+| `krodo "create a mario game"` | Headless — prompt is `"create a mario game"` |
+| `krodo` | Interactive REPL |
+| `krodo resume` | Resume subcommand (most recent session) |
+| `krodo resume abc123` | Resume subcommand with session ID `abc123` |
+| `krodo resume --root /path` | Resume subcommand; `--root` goes to `resume` |
+| `krodo --root /path resume` | Resume subcommand; global `--root` inherited as default |
+| `krodo undo` | Undo subcommand |
+| `krodo doctor` | Doctor subcommand |
 
 **Key rules:**
 
@@ -298,17 +298,17 @@ Coda has three named subcommands — `resume`, `undo`, and `doctor` — alongsid
 - Global flags (`--root`, `--model`, `--approval`, etc.) can go **before or after** the subcommand token. When placed before, they are propagated to the subcommand as defaults; an explicit flag in the subcommand itself always wins.
 - Natural-language prompts should be **quoted** so they arrive as a single token. Without quotes, the first word could match a subcommand name:
   ```bash
-  coda "resume the work from yesterday"   # ✓ headless with full prompt
-  coda resume the work from yesterday     # ✗ routes to resume subcommand; "the" is unexpected arg
+  krodo "resume the work from yesterday"   # ✓ headless with full prompt
+  krodo resume the work from yesterday     # ✗ routes to resume subcommand; "the" is unexpected arg
   ```
 
 ## Local development
 
-Coda uses [`uv`](https://docs.astral.sh/uv/) for dependency and venv management.
+Krodo uses [`uv`](https://docs.astral.sh/uv/) for dependency and venv management.
 
 ```bash
-git clone https://github.com/<org>/coda
-cd coda
+git clone https://github.com/<org>/krodo
+cd krodo
 uv sync                       # install deps + create .venv
 uv run pytest                 # run tests
 uv run ruff check             # lint
@@ -326,21 +326,21 @@ export OPENAI_API_KEY=sk-...
 ## Project layout
 
 ```
-coda/
-  src/coda/
+krodo/
+  src/krodo/
     cli/        # Typer entry, REPL, headless exec
     core/       # Agent loop, Context, Budget, Compression, Recovery, Events
     llm/        # LLMProvider Protocol + LiteLLM adapter
     tools/      # File / shell / patch / search / git tools
     sandbox/    # Path firewall, command policy, approval modes
-    memory/     # JSONL session store, coda resume, AGENTS.md loader, config
+    memory/     # JSONL session store, krodo resume, AGENTS.md loader, config
     obs/        # structlog + OpenTelemetry + cost tracker
   tests/{unit,integration,e2e}/
   docs/
     architecture.md         # design baseline (read this first)
     reviews/                # past architecture review notes
   scripts/
-    prototype.py            # Phase 0 single-file prototype (DEPRECATED — use coda CLI)
+    prototype.py            # Phase 0 single-file prototype (DEPRECATED — use krodo CLI)
 ```
 
 ## Contributing
@@ -356,4 +356,4 @@ Ground rules:
 
 ## License
 
-[Apache-2.0](LICENSE) © The Coda Contributors
+[Apache-2.0](LICENSE) © The Krodo Contributors

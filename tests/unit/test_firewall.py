@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from coda.core.workspace import LocalWorkspaceResolver
-from coda.sandbox.firewall import BLOCKLIST_FIRST_TOKEN, LocalSandboxRunner
+from krodo.core.workspace import LocalWorkspaceResolver
+from krodo.sandbox.firewall import BLOCKLIST_FIRST_TOKEN, LocalSandboxRunner
 
 
 def _make_sandbox(tmp_path: Path) -> LocalSandboxRunner:

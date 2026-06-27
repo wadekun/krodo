@@ -1,4 +1,4 @@
-"""Tests for coda.obs.logger — JSONL writing + secret redactor."""
+"""Tests for krodo.obs.logger — JSONL writing + secret redactor."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from coda.core.workspace import LocalWorkspaceResolver
-from coda.obs.logger import (
+from krodo.core.workspace import LocalWorkspaceResolver
+from krodo.obs.logger import (
     configure_logging,
     get_session_log_path,
     redact_secrets,
@@ -67,10 +67,10 @@ def test_configure_logging_returns_logger(tmp_path: Path) -> None:
     assert isinstance(logger, logging.Logger)
 
 
-def test_log_file_written_to_coda_logs_dir(tmp_path: Path) -> None:
+def test_log_file_written_to_krodo_logs_dir(tmp_path: Path) -> None:
     ws = LocalWorkspaceResolver().resolve(explicit=tmp_path)
     configure_logging(ws, "test-session-003")
-    log_dir = tmp_path / ".coda" / "logs"
+    log_dir = tmp_path / ".krodo" / "logs"
     assert log_dir.is_dir()
     assert (log_dir / "test-session-003.log").exists()  # M5.1: .log extension
 
@@ -104,7 +104,7 @@ def test_secret_not_written_to_log(tmp_path: Path) -> None:
 def test_get_session_log_path_correct_location(tmp_path: Path) -> None:
     ws = LocalWorkspaceResolver().resolve(explicit=tmp_path)
     path = get_session_log_path(ws, "abc-123")
-    assert path == tmp_path / ".coda" / "logs" / "abc-123.log"  # M5.1: .log extension
+    assert path == tmp_path / ".krodo" / "logs" / "abc-123.log"  # M5.1: .log extension
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ def test_get_session_log_path_correct_location(tmp_path: Path) -> None:
 
 
 def test_secret_redactor_processor_redacts_string_values(tmp_path: Path) -> None:
-    from coda.obs.logger import _SecretRedactorProcessor
+    from krodo.obs.logger import _SecretRedactorProcessor
 
     proc = _SecretRedactorProcessor()
     event_dict = {"event": "test", "key": "sk-ant-api03-ABC123456789abc"}
@@ -123,7 +123,7 @@ def test_secret_redactor_processor_redacts_string_values(tmp_path: Path) -> None
 
 
 def test_secret_redactor_processor_ignores_non_strings(tmp_path: Path) -> None:
-    from coda.obs.logger import _SecretRedactorProcessor
+    from krodo.obs.logger import _SecretRedactorProcessor
 
     proc = _SecretRedactorProcessor()
     event_dict = {"count": 42, "flag": True, "event": "safe"}

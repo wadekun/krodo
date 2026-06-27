@@ -1,4 +1,4 @@
-"""Unit tests for src/coda/core/compression.py."""
+"""Unit tests for src/krodo/core/compression.py."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from coda.core.compression import (
+from krodo.core.compression import (
     AlgorithmicCompressor,
     LLMSummaryCompressor,
     _extract_file_paths,
@@ -14,7 +14,7 @@ from coda.core.compression import (
     _pinned_ids,
     make_compressor,
 )
-from coda.core.types import Message, SessionEventType, ToolCall
+from krodo.core.types import Message, SessionEventType, ToolCall
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -290,12 +290,12 @@ class TestMakeCompressor:
         assert isinstance(compressor, LLMSummaryCompressor)
 
     def test_env_var_selects_algorithmic(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("CODA_COMPRESS", "algorithmic")
+        monkeypatch.setenv("KRODO_COMPRESS", "algorithmic")
         compressor = make_compressor()
         assert isinstance(compressor, AlgorithmicCompressor)
 
     def test_env_var_selects_llm(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("CODA_COMPRESS", "llm")
+        monkeypatch.setenv("KRODO_COMPRESS", "llm")
         provider = _make_mock_provider()
         compressor = make_compressor(provider=provider)
         assert isinstance(compressor, LLMSummaryCompressor)
@@ -309,12 +309,12 @@ class TestMakeCompressor:
             make_compressor(strategy="magic")
 
     def test_default_without_provider_is_algorithmic(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("CODA_COMPRESS", raising=False)
+        monkeypatch.delenv("KRODO_COMPRESS", raising=False)
         compressor = make_compressor()
         assert isinstance(compressor, AlgorithmicCompressor)
 
     def test_explicit_strategy_overrides_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("CODA_COMPRESS", "llm")
+        monkeypatch.setenv("KRODO_COMPRESS", "llm")
         # Explicitly passing algorithmic should override env
         compressor = make_compressor(strategy="algorithmic")
         assert isinstance(compressor, AlgorithmicCompressor)
@@ -328,8 +328,8 @@ class TestMakeCompressor:
 class TestContextManagerWithCompressor:
     @pytest.mark.asyncio
     async def test_compress_if_needed_calls_compressor_when_over_budget(self) -> None:
-        from coda.core.budget import BudgetCalculator
-        from coda.core.context import InMemoryContextManager
+        from krodo.core.budget import BudgetCalculator
+        from krodo.core.context import InMemoryContextManager
 
         call_count = 0
 
@@ -356,7 +356,7 @@ class TestContextManagerWithCompressor:
 
     @pytest.mark.asyncio
     async def test_compress_if_needed_no_op_without_budget(self) -> None:
-        from coda.core.context import InMemoryContextManager
+        from krodo.core.context import InMemoryContextManager
 
         compressor = AlgorithmicCompressor()
         ctx = InMemoryContextManager(
@@ -369,8 +369,8 @@ class TestContextManagerWithCompressor:
 
     @pytest.mark.asyncio
     async def test_compress_if_needed_returns_none_when_ok(self) -> None:
-        from coda.core.budget import BudgetCalculator
-        from coda.core.context import InMemoryContextManager
+        from krodo.core.budget import BudgetCalculator
+        from krodo.core.context import InMemoryContextManager
 
         calc = BudgetCalculator(model="gpt-4o", count_fn=lambda _: 100)
         ctx = InMemoryContextManager(system_prompt="sys", budget=calc)

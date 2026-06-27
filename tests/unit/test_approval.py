@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
-from coda.core.types import ToolCall
-from coda.sandbox.approval import (
+from krodo.core.types import ToolCall
+from krodo.sandbox.approval import (
     _NO_APPROVAL_TOOLS,
     PatternRule,
     TerminalApprovalManager,
@@ -177,12 +177,12 @@ def test_match_pattern_different_tool_does_not_match() -> None:
 
 
 def test_match_pattern_path_glob_matches() -> None:
-    rules = [PatternRule(tool_name="read_file", arg_glob="src/coda/*")]
-    assert _match_pattern(_call("read_file", path="src/coda/main.py"), rules)
+    rules = [PatternRule(tool_name="read_file", arg_glob="src/krodo/*")]
+    assert _match_pattern(_call("read_file", path="src/krodo/main.py"), rules)
 
 
 def test_match_pattern_path_glob_no_match() -> None:
-    rules = [PatternRule(tool_name="read_file", arg_glob="src/coda/*")]
+    rules = [PatternRule(tool_name="read_file", arg_glob="src/krodo/*")]
     assert not _match_pattern(_call("read_file", path="tests/test_main.py"), rules)
 
 

@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from coda.core.workspace import LocalWorkspaceResolver
-from coda.sandbox.firewall import LocalSandboxRunner
-from coda.tools.builtin.patch import ApplyPatchTool
-from coda.tools.protocols import ToolContext
+from krodo.core.workspace import LocalWorkspaceResolver
+from krodo.sandbox.firewall import LocalSandboxRunner
+from krodo.tools.builtin.patch import ApplyPatchTool
+from krodo.tools.protocols import ToolContext
 
 
 def _ctx(tmp_path: Path) -> ToolContext:

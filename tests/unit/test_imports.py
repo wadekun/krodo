@@ -1,4 +1,4 @@
-"""Smoke test: every src/coda subpackage must be importable.
+"""Smoke test: every src/krodo subpackage must be importable.
 
 This guards the Protocol-first principle (architecture.md §11.2) — if a
 submodule fails to import, every downstream test will fail noisily, so we
@@ -14,14 +14,14 @@ import importlib
 import pytest
 
 EXPECTED_SUBMODULES = (
-    "coda",
-    "coda.cli",
-    "coda.core",
-    "coda.llm",
-    "coda.memory",
-    "coda.obs",
-    "coda.sandbox",
-    "coda.tools",
+    "krodo",
+    "krodo.cli",
+    "krodo.core",
+    "krodo.llm",
+    "krodo.memory",
+    "krodo.obs",
+    "krodo.sandbox",
+    "krodo.tools",
 )
 
 

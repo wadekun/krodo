@@ -1,4 +1,4 @@
-"""Integration test: §8 acceptance for coda undo (M4 PR4).
+"""Integration test: §8 acceptance for krodo undo (M4 PR4).
 
 Scenario:
   1. Initialise a git repo in a temp dir.
@@ -16,11 +16,11 @@ from pathlib import Path
 
 import pytest
 
-from coda.cli.undo import undo_command
-from coda.core.events import SessionEventLogger
-from coda.core.types import SessionEventType
-from coda.core.workspace import LocalWorkspaceResolver
-from coda.sandbox.checkpoint import GitCheckpointManager
+from krodo.cli.undo import undo_command
+from krodo.core.events import SessionEventLogger
+from krodo.core.types import SessionEventType
+from krodo.core.workspace import LocalWorkspaceResolver
+from krodo.sandbox.checkpoint import GitCheckpointManager
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -81,11 +81,11 @@ async def test_undo_reverts_written_file(tmp_path: Path) -> None:
     sha = await mgr.create([readme])
     assert sha is not None, "Dirty tracked file should produce a stash SHA"
 
-    # Write the CHECKPOINT event to the session JSONL (now in .coda/sessions/)
+    # Write the CHECKPOINT event to the session JSONL (now in .krodo/sessions/)
     session_id = "e2e-test"
-    from coda.memory.store import JsonlSessionStore  # noqa: PLC0415
+    from krodo.memory.store import JsonlSessionStore  # noqa: PLC0415
 
-    store = JsonlSessionStore(tmp_path / ".coda" / "sessions")
+    store = JsonlSessionStore(tmp_path / ".krodo" / "sessions")
     store.create_session(session_id, model=None, agents_md_hash=None, initial_prompt_hash=None)
     event_logger = SessionEventLogger.from_store(store, session_id)
     event_logger.emit(
@@ -96,7 +96,7 @@ async def test_undo_reverts_written_file(tmp_path: Path) -> None:
             "tool": "write_file",
         },
     )
-    jsonl_path = tmp_path / ".coda" / "sessions" / f"{session_id}.jsonl"
+    jsonl_path = tmp_path / ".krodo" / "sessions" / f"{session_id}.jsonl"
 
     assert readme.read_text() == "agent-modified\n"
 
@@ -104,7 +104,7 @@ async def test_undo_reverts_written_file(tmp_path: Path) -> None:
     readme.write_text("second-modification\n")
     assert readme.read_text() == "second-modification\n"
 
-    # Run coda undo — should restore to the stash-captured state ("agent-modified\n")
+    # Run krodo undo — should restore to the stash-captured state ("agent-modified\n")
     undo_command(session=session_id, _workspace_root=tmp_path)
 
     # git checkout <stash_sha> -- readme.txt restores the working-tree snapshot
@@ -135,9 +135,9 @@ async def test_undo_reverts_edited_file(tmp_path: Path) -> None:
     assert sha is not None
 
     session_id = "e2e-edit"
-    from coda.memory.store import JsonlSessionStore  # noqa: PLC0415
+    from krodo.memory.store import JsonlSessionStore  # noqa: PLC0415
 
-    store = JsonlSessionStore(tmp_path / ".coda" / "sessions")
+    store = JsonlSessionStore(tmp_path / ".krodo" / "sessions")
     store.create_session(session_id, model=None, agents_md_hash=None, initial_prompt_hash=None)
     event_logger = SessionEventLogger.from_store(store, session_id)
     event_logger.emit(
@@ -160,10 +160,10 @@ def test_undo_non_git_workspace_exits_1(tmp_path: Path) -> None:
     """Non-git workspace: undo exits with code 1 and does not crash."""
     import typer  # noqa: PLC0415
 
-    from coda.memory.store import JsonlSessionStore  # noqa: PLC0415
+    from krodo.memory.store import JsonlSessionStore  # noqa: PLC0415
 
     # Write a fake checkpoint event to the sessions dir
-    sessions_dir = tmp_path / ".coda" / "sessions"
+    sessions_dir = tmp_path / ".krodo" / "sessions"
     store = JsonlSessionStore(sessions_dir)
     store.create_session("sess", model=None, agents_md_hash=None, initial_prompt_hash=None)
 

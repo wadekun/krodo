@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from coda.core.workspace import LocalWorkspaceResolver
-from coda.sandbox.path_filter import _NOISE_DIRS, filter_allowed_paths, is_noise_dir
+from krodo.core.workspace import LocalWorkspaceResolver
+from krodo.sandbox.path_filter import _NOISE_DIRS, filter_allowed_paths, is_noise_dir
 
 # ---------------------------------------------------------------------------
 # is_noise_dir
@@ -22,7 +22,7 @@ def test_is_noise_dir_detects_noise_names() -> None:
 
 def test_is_noise_dir_passes_clean_paths() -> None:
     clean = [
-        Path("src/coda/core/workspace.py"),
+        Path("src/krodo/core/workspace.py"),
         Path("tests/unit/test_foo.py"),
         Path("README.md"),
     ]

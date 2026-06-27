@@ -10,8 +10,8 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from coda.core.loop import AgentLoop
-from coda.core.types import (
+from krodo.core.loop import AgentLoop
+from krodo.core.types import (
     Decision,
     LLMChunk,
     Message,
@@ -19,11 +19,11 @@ from coda.core.types import (
     ToolDef,
     ToolResult,
 )
-from coda.core.workspace import LocalWorkspaceResolver
-from coda.llm.streaming import ChunkAccumulator
-from coda.sandbox.firewall import LocalSandboxRunner
-from coda.tools.protocols import ToolContext
-from coda.tools.registry import ToolRegistry
+from krodo.core.workspace import LocalWorkspaceResolver
+from krodo.llm.streaming import ChunkAccumulator
+from krodo.sandbox.firewall import LocalSandboxRunner
+from krodo.tools.protocols import ToolContext
+from krodo.tools.registry import ToolRegistry
 
 # ---------------------------------------------------------------------------
 # ChunkAccumulator unit tests
@@ -324,7 +324,7 @@ async def test_loop_streaming_tool_call_turn(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_loop_stream_disabled_uses_chat(tmp_path: Path) -> None:
     """LoopConfig(stream=False) forces the non-streaming chat() path."""
-    from coda.core.loop import LoopConfig
+    from krodo.core.loop import LoopConfig
 
     class _ChatOnlyProvider(_StreamingProvider):
         async def chat(

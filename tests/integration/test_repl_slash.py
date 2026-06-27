@@ -1,6 +1,6 @@
 """Integration tests for the M6.4 REPL slash commands.
 
-Drives `coda` (no prompt) through CliRunner with scripted `input()`, same
+Drives `krodo` (no prompt) through CliRunner with scripted `input()`, same
 pattern as test_cli_repl.py.  Verifies that slash commands are handled
 locally (the LLM never sees them) and that `:resume <id>` switches sessions
 with history intact.
@@ -14,8 +14,8 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from coda.cli.main import app
-from coda.core.types import Message, ToolDef
+from krodo.cli.main import app
+from krodo.core.types import Message, ToolDef
 
 
 class _ScriptedProvider:
@@ -62,7 +62,7 @@ def _script_inputs(seq: list[str]):  # type: ignore[no-untyped-def]
 
 
 def _patch_provider(provider: _ScriptedProvider):  # type: ignore[no-untyped-def]
-    return patch("coda.cli.main.LiteLLMProvider", return_value=provider)
+    return patch("krodo.cli.main.LiteLLMProvider", return_value=provider)
 
 
 def test_help_lists_commands_without_llm_call(tmp_path: Path) -> None:
@@ -197,7 +197,7 @@ def test_resume_switches_session_with_history(tmp_path: Path) -> None:
         )
     assert result1.exit_code == 0, result1.output
 
-    session_files = list((tmp_path / ".coda" / "sessions").glob("*.jsonl"))
+    session_files = list((tmp_path / ".krodo" / "sessions").glob("*.jsonl"))
     assert len(session_files) == 1
     old_id = session_files[0].stem
 

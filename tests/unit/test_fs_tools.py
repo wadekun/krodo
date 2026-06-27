@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from coda.core.workspace import LocalWorkspaceResolver
-from coda.sandbox.firewall import LocalSandboxRunner
-from coda.sandbox.ignore import CodaIgnore
-from coda.tools.builtin.fs import ReadFileTool, WriteFileTool
-from coda.tools.protocols import ToolContext
+from krodo.core.workspace import LocalWorkspaceResolver
+from krodo.sandbox.firewall import LocalSandboxRunner
+from krodo.sandbox.ignore import KrodoIgnore
+from krodo.tools.builtin.fs import ReadFileTool, WriteFileTool
+from krodo.tools.protocols import ToolContext
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -22,7 +22,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
         sandbox=sb,
         session_id="test",
         logger=logging.getLogger("test"),
-        ignore=CodaIgnore(tmp_path),
+        ignore=KrodoIgnore(tmp_path),
     )
 
 
@@ -99,7 +99,7 @@ async def test_read_file_not_a_file(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_file_ignored_by_codaignore(tmp_path: Path) -> None:
+async def test_read_file_ignored_by_krodoignore(tmp_path: Path) -> None:
     """read_file on a .env file returns PathIgnoredError (hardcoded default)."""
     (tmp_path / ".env").write_text("SECRET=abc\n")
     ctx = _ctx(tmp_path)
@@ -167,7 +167,7 @@ async def test_write_file_overwrites_existing(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_edit_file_detects_external_modification(tmp_path: Path) -> None:
     """edit_file must return an error if the file was externally modified since read."""
-    from coda.tools.builtin.fs import EditFileTool, ReadFileTool, _sha256_cache
+    from krodo.tools.builtin.fs import EditFileTool, ReadFileTool, _sha256_cache
 
     ctx = _ctx(tmp_path)
     target = tmp_path / "target.py"
@@ -193,7 +193,7 @@ async def test_edit_file_detects_external_modification(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_edit_file_succeeds_when_no_external_change(tmp_path: Path) -> None:
     """edit_file must succeed when the file hasn't been externally modified."""
-    from coda.tools.builtin.fs import EditFileTool, ReadFileTool
+    from krodo.tools.builtin.fs import EditFileTool, ReadFileTool
 
     ctx = _ctx(tmp_path)
     target = tmp_path / "target.py"
@@ -211,7 +211,7 @@ async def test_edit_file_succeeds_when_no_external_change(tmp_path: Path) -> Non
 @pytest.mark.asyncio
 async def test_edit_file_no_cache_allows_edit(tmp_path: Path) -> None:
     """edit_file must succeed when no SHA256 is cached (first-time edit without prior read)."""
-    from coda.tools.builtin.fs import EditFileTool, _sha256_cache
+    from krodo.tools.builtin.fs import EditFileTool, _sha256_cache
 
     ctx = _ctx(tmp_path)
     target = tmp_path / "fresh.py"

@@ -8,11 +8,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from coda.core.workspace import LocalWorkspaceResolver
-from coda.sandbox.firewall import LocalSandboxRunner
-from coda.sandbox.ignore import CodaIgnore
-from coda.tools.builtin.search import GlobTool, GrepTool, ListDirTool, _rg_available
-from coda.tools.protocols import ToolContext
+from krodo.core.workspace import LocalWorkspaceResolver
+from krodo.sandbox.firewall import LocalSandboxRunner
+from krodo.sandbox.ignore import KrodoIgnore
+from krodo.tools.builtin.search import GlobTool, GrepTool, ListDirTool, _rg_available
+from krodo.tools.protocols import ToolContext
+
+# Module-level target string — keeps `with patch(...)` lines under 100 chars.
+_RG_TRY = "krodo.tools.builtin.search._try_ripgrep"
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -23,15 +26,15 @@ def _ctx(tmp_path: Path) -> ToolContext:
         sandbox=sb,
         session_id="test",
         logger=logging.getLogger("test"),
-        ignore=CodaIgnore(tmp_path),
+        ignore=KrodoIgnore(tmp_path),
     )
 
 
 def _make_tree(tmp_path: Path) -> None:
     """Build a small but representative directory tree."""
-    (tmp_path / "src" / "coda").mkdir(parents=True)
-    (tmp_path / "src" / "coda" / "main.py").write_text("# main\nTODO: implement me\n")
-    (tmp_path / "src" / "coda" / "utils.py").write_text("# utils\n")
+    (tmp_path / "src" / "krodo").mkdir(parents=True)
+    (tmp_path / "src" / "krodo" / "main.py").write_text("# main\nTODO: implement me\n")
+    (tmp_path / "src" / "krodo" / "utils.py").write_text("# utils\n")
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_main.py").write_text("# test\nTODO: add tests\n")
     (tmp_path / "README.md").write_text("# Readme\n")
@@ -71,7 +74,7 @@ async def test_list_dir_skips_noise(tmp_path: Path) -> None:
 async def test_list_dir_depth_limit(tmp_path: Path) -> None:
     _make_tree(tmp_path)
     ctx = _ctx(tmp_path)
-    # depth=1 should not show files inside src/coda/
+    # depth=1 should not show files inside src/krodo/
     result = await ListDirTool().execute({"path": ".", "depth": 1}, ctx)
     assert not result.is_error
     assert "main.py" not in result.content  # nested 2 deep
@@ -83,8 +86,8 @@ async def test_list_dir_depth_2_shows_nested(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     result = await ListDirTool().execute({"path": ".", "depth": 2}, ctx)
     assert not result.is_error
-    # src/ is depth 1; src/coda/ is depth 2 → listed
-    assert "coda" in result.content
+    # src/ is depth 1; src/krodo/ is depth 2 → listed
+    assert "krodo" in result.content
 
 
 @pytest.mark.asyncio
@@ -189,7 +192,7 @@ async def test_grep_finds_pattern(tmp_path: Path) -> None:
     _make_tree(tmp_path)
     ctx = _ctx(tmp_path)
     # Force Python fallback to keep test hermetic
-    with patch("coda.tools.builtin.search._try_ripgrep", new_callable=AsyncMock, return_value=None):
+    with patch(_RG_TRY, new_callable=AsyncMock, return_value=None):
         result = await GrepTool().execute({"pattern": "TODO", "path": "."}, ctx)
     assert not result.is_error, result.content
     assert "TODO" in result.content
@@ -199,7 +202,7 @@ async def test_grep_finds_pattern(tmp_path: Path) -> None:
 async def test_grep_case_insensitive(tmp_path: Path) -> None:
     _make_tree(tmp_path)
     ctx = _ctx(tmp_path)
-    with patch("coda.tools.builtin.search._try_ripgrep", new_callable=AsyncMock, return_value=None):
+    with patch(_RG_TRY, new_callable=AsyncMock, return_value=None):
         result = await GrepTool().execute(
             {"pattern": "todo", "path": ".", "case_sensitive": False}, ctx
         )
@@ -211,7 +214,7 @@ async def test_grep_case_insensitive(tmp_path: Path) -> None:
 async def test_grep_with_include_filter(tmp_path: Path) -> None:
     _make_tree(tmp_path)
     ctx = _ctx(tmp_path)
-    with patch("coda.tools.builtin.search._try_ripgrep", new_callable=AsyncMock, return_value=None):
+    with patch(_RG_TRY, new_callable=AsyncMock, return_value=None):
         result = await GrepTool().execute({"pattern": "TODO", "path": ".", "include": "*.md"}, ctx)
     # README.md does not have TODO; only .py files do
     assert not result.is_error
@@ -222,7 +225,7 @@ async def test_grep_with_include_filter(tmp_path: Path) -> None:
 async def test_grep_skips_noise_dirs(tmp_path: Path) -> None:
     _make_tree(tmp_path)
     ctx = _ctx(tmp_path)
-    with patch("coda.tools.builtin.search._try_ripgrep", new_callable=AsyncMock, return_value=None):
+    with patch(_RG_TRY, new_callable=AsyncMock, return_value=None):
         result = await GrepTool().execute({"pattern": "exports", "path": "."}, ctx)
     # node_modules/pkg/index.js has "module.exports" but should be skipped
     assert "index.js" not in result.content
@@ -232,7 +235,7 @@ async def test_grep_skips_noise_dirs(tmp_path: Path) -> None:
 async def test_grep_no_matches(tmp_path: Path) -> None:
     _make_tree(tmp_path)
     ctx = _ctx(tmp_path)
-    with patch("coda.tools.builtin.search._try_ripgrep", new_callable=AsyncMock, return_value=None):
+    with patch(_RG_TRY, new_callable=AsyncMock, return_value=None):
         result = await GrepTool().execute({"pattern": "XYZZY_NOTFOUND_999", "path": "."}, ctx)
     assert not result.is_error
     assert "no matches" in result.content
@@ -242,7 +245,7 @@ async def test_grep_no_matches(tmp_path: Path) -> None:
 async def test_grep_invalid_regex(tmp_path: Path) -> None:
     _make_tree(tmp_path)
     ctx = _ctx(tmp_path)
-    with patch("coda.tools.builtin.search._try_ripgrep", new_callable=AsyncMock, return_value=None):
+    with patch(_RG_TRY, new_callable=AsyncMock, return_value=None):
         result = await GrepTool().execute({"pattern": "[invalid(regex", "path": "."}, ctx)
     assert result.is_error
     assert "invalid regex" in result.content
@@ -303,7 +306,7 @@ async def test_grep_python_fallback_no_matches_for_include(tmp_path: Path) -> No
     """Python fallback with include filter that doesn't match any files."""
     _make_tree(tmp_path)
     ctx = _ctx(tmp_path)
-    with patch("coda.tools.builtin.search._try_ripgrep", new_callable=AsyncMock, return_value=None):
+    with patch(_RG_TRY, new_callable=AsyncMock, return_value=None):
         result = await GrepTool().execute({"pattern": "TODO", "path": ".", "include": "*.rs"}, ctx)
     assert not result.is_error
     assert "no matches" in result.content
@@ -312,7 +315,7 @@ async def test_grep_python_fallback_no_matches_for_include(tmp_path: Path) -> No
 @pytest.mark.asyncio
 async def test_try_ripgrep_returns_none_when_rg_not_found(tmp_path: Path) -> None:
     """_try_ripgrep returns None when rg binary is not found."""
-    from coda.tools.builtin.search import _try_ripgrep
+    from krodo.tools.builtin.search import _try_ripgrep
 
     with patch(
         "asyncio.create_subprocess_exec",
@@ -333,7 +336,7 @@ async def test_try_ripgrep_no_output_returns_no_matches(tmp_path: Path) -> None:
     """_try_ripgrep returns a '(no matches)' string when rg exits with empty output."""
     from unittest.mock import MagicMock
 
-    from coda.tools.builtin.search import _try_ripgrep
+    from krodo.tools.builtin.search import _try_ripgrep
 
     mock_proc = MagicMock()
     mock_proc.communicate = AsyncMock(return_value=(b"", b""))
@@ -351,13 +354,13 @@ async def test_try_ripgrep_no_output_returns_no_matches(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# CodaIgnore integration in search tools (M4 PR5)
+# KrodoIgnore integration in search tools (M4 PR5)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_list_dir_skips_ignored_paths(tmp_path: Path) -> None:
-    """list_dir should not return paths matched by CodaIgnore."""
+    """list_dir should not return paths matched by KrodoIgnore."""
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "main.py").write_text("code\n")
     (tmp_path / ".env").write_text("SECRET=1\n")
@@ -390,7 +393,7 @@ async def test_grep_skips_ignored_files(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text("SECRET=find_me\n")
 
     ctx = _ctx(tmp_path)
-    with patch("coda.tools.builtin.search._try_ripgrep", return_value=None):
+    with patch(_RG_TRY, return_value=None):
         result = await GrepTool().execute(
             {"pattern": "find_me", "path": ".", "case_sensitive": True}, ctx
         )

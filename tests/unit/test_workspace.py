@@ -1,7 +1,7 @@
-"""Tests for coda.core.workspace — Workspace model + LocalWorkspaceResolver.
+"""Tests for krodo.core.workspace — Workspace model + LocalWorkspaceResolver.
 
 Covers:
-- 5-level discovery priority (flag / env / .coda marker / .git marker / cwd)
+- 5-level discovery priority (flag / env / .krodo marker / .git marker / cwd)
 - 4 Workspace invariants (frozen, root is_dir, root writable, source values)
 - memory_paths collection
 - git_root discovery
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from coda.core.workspace import LocalWorkspaceResolver, Workspace
+from krodo.core.workspace import LocalWorkspaceResolver, Workspace
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -33,7 +33,7 @@ def _workspace(tmp_path: Path, **kwargs: object) -> Workspace:
 
     defaults: dict[str, object] = {
         "root": tmp_path,
-        "config_path": tmp_path / ".coda" / "config.yaml",
+        "config_path": tmp_path / ".krodo" / "config.yaml",
         "memory_paths": [],
         "git_root": None,
         "source": "cwd",
@@ -51,8 +51,8 @@ def _workspace(tmp_path: Path, **kwargs: object) -> Workspace:
 def test_resolve_flag_takes_priority(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     other = tmp_path / "other"
     other.mkdir()
-    # Even if CODA_ROOT is set, explicit flag wins
-    monkeypatch.setenv("CODA_ROOT", str(tmp_path))
+    # Even if KRODO_ROOT is set, explicit flag wins
+    monkeypatch.setenv("KRODO_ROOT", str(tmp_path))
     ws = make_resolver().resolve(explicit=other)
     assert ws.root == other
     assert ws.source == "flag"
@@ -65,12 +65,12 @@ def test_resolve_flag_expands_home(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Priority 2: CODA_ROOT env var
+# Priority 2: KRODO_ROOT env var
 # ---------------------------------------------------------------------------
 
 
 def test_resolve_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CODA_ROOT", str(tmp_path))
+    monkeypatch.setenv("KRODO_ROOT", str(tmp_path))
     monkeypatch.chdir(tmp_path)  # No marker in tmp_path
     ws = make_resolver().resolve(explicit=None)
     assert ws.root == tmp_path.resolve()
@@ -81,20 +81,20 @@ def test_resolve_env_var_missing_dir_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     missing = tmp_path / "nonexistent"
-    monkeypatch.setenv("CODA_ROOT", str(missing))
+    monkeypatch.setenv("KRODO_ROOT", str(missing))
     monkeypatch.chdir(tmp_path)
     with pytest.raises(ValueError, match="not a directory"):
         make_resolver().resolve(explicit=None)
 
 
 # ---------------------------------------------------------------------------
-# Priority 3: .coda/ marker ancestor
+# Priority 3: .krodo/ marker ancestor
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_coda_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("CODA_ROOT", raising=False)
-    (tmp_path / ".coda").mkdir()
+def test_resolve_krodo_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("KRODO_ROOT", raising=False)
+    (tmp_path / ".krodo").mkdir()
     subdir = tmp_path / "deep" / "nested"
     subdir.mkdir(parents=True)
     monkeypatch.chdir(subdir)
@@ -103,13 +103,13 @@ def test_resolve_coda_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert ws.source == "marker"
 
 
-def test_resolve_coda_marker_beats_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("CODA_ROOT", raising=False)
-    # .git at root, .coda at child — child wins because we walk upward from CWD
+def test_resolve_krodo_marker_beats_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("KRODO_ROOT", raising=False)
+    # .git at root, .krodo at child — child wins because we walk upward from CWD
     (tmp_path / ".git").mkdir()
     child = tmp_path / "project"
     child.mkdir()
-    (child / ".coda").mkdir()
+    (child / ".krodo").mkdir()
     monkeypatch.chdir(child)
     ws = make_resolver().resolve(explicit=None)
     assert ws.root == child
@@ -122,7 +122,7 @@ def test_resolve_coda_marker_beats_git(tmp_path: Path, monkeypatch: pytest.Monke
 
 
 def test_resolve_git_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("CODA_ROOT", raising=False)
+    monkeypatch.delenv("KRODO_ROOT", raising=False)
     (tmp_path / ".git").mkdir()
     subdir = tmp_path / "src"
     subdir.mkdir()
@@ -138,7 +138,7 @@ def test_resolve_git_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_resolve_cwd_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("CODA_ROOT", raising=False)
+    monkeypatch.delenv("KRODO_ROOT", raising=False)
     monkeypatch.chdir(tmp_path)
     ws = make_resolver().resolve(explicit=None)
     assert ws.root == tmp_path.resolve()
@@ -168,7 +168,7 @@ def test_workspace_rejects_missing_root(tmp_path: Path) -> None:
         Workspace.model_validate(
             {
                 "root": tmp_path / "does_not_exist",
-                "config_path": tmp_path / ".coda" / "config.yaml",
+                "config_path": tmp_path / ".krodo" / "config.yaml",
                 "memory_paths": [],
                 "git_root": None,
                 "source": "cwd",
@@ -192,7 +192,7 @@ def test_workspace_rejects_unwritable_root(tmp_path: Path) -> None:
         Workspace.model_validate(
             {
                 "root": read_only,
-                "config_path": read_only / ".coda" / "config.yaml",
+                "config_path": read_only / ".krodo" / "config.yaml",
                 "memory_paths": [],
                 "git_root": None,
                 "source": "cwd",
@@ -214,7 +214,7 @@ def test_workspace_rejects_invalid_source(tmp_path: Path) -> None:
         Workspace.model_validate(
             {
                 "root": tmp_path,
-                "config_path": tmp_path / ".coda" / "config.yaml",
+                "config_path": tmp_path / ".krodo" / "config.yaml",
                 "memory_paths": [],
                 "git_root": None,
                 "source": "magic",  # invalid
@@ -230,9 +230,9 @@ def test_workspace_rejects_invalid_source(tmp_path: Path) -> None:
 
 def test_memory_paths_includes_existing_agents_md(tmp_path: Path) -> None:
     (tmp_path / "AGENTS.md").write_text("# project")
-    (tmp_path / ".coda").mkdir()
+    (tmp_path / ".krodo").mkdir()
     monkeypatch_obj = pytest.MonkeyPatch()
-    monkeypatch_obj.delenv("CODA_ROOT", raising=False)
+    monkeypatch_obj.delenv("KRODO_ROOT", raising=False)
     ws = make_resolver().resolve(explicit=tmp_path)
     assert tmp_path / "AGENTS.md" in ws.memory_paths
     monkeypatch_obj.undo()

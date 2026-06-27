@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import BaseModel
 
-from coda.core.types import Message, ToolCall, ToolDef, ToolResult
-from coda.llm.litellm_provider import (
+from krodo.core.types import Message, ToolCall, ToolDef, ToolResult
+from krodo.llm.litellm_provider import (
     LiteLLMProvider,
     _litellm_to_message,
     _message_to_litellm,
@@ -152,7 +152,7 @@ async def test_chat_returns_assistant_message() -> None:
     mock_response = _make_acompletion_response("Hello!")
 
     with patch(
-        "coda.llm.litellm_provider.litellm.acompletion",
+        "krodo.llm.litellm_provider.litellm.acompletion",
         new_callable=AsyncMock,
         return_value=mock_response,
     ):
@@ -172,7 +172,7 @@ async def test_chat_passes_api_base_and_key() -> None:
     mock_response = _make_acompletion_response("ok")
 
     with patch(
-        "coda.llm.litellm_provider.litellm.acompletion",
+        "krodo.llm.litellm_provider.litellm.acompletion",
         new_callable=AsyncMock,
         return_value=mock_response,
     ) as mock_call:
@@ -189,7 +189,7 @@ async def test_chat_omits_api_base_when_none() -> None:
     mock_response = _make_acompletion_response("ok")
 
     with patch(
-        "coda.llm.litellm_provider.litellm.acompletion",
+        "krodo.llm.litellm_provider.litellm.acompletion",
         new_callable=AsyncMock,
         return_value=mock_response,
     ) as mock_call:
@@ -234,7 +234,7 @@ async def test_stream_chat_yields_chunks() -> None:
             yield c
 
     with patch(
-        "coda.llm.litellm_provider.litellm.acompletion",
+        "krodo.llm.litellm_provider.litellm.acompletion",
         new_callable=AsyncMock,
         return_value=_fake_stream(),
     ):
@@ -341,7 +341,7 @@ async def test_chat_preserves_finish_reason_max_tokens() -> None:
     mock_response = _make_acompletion_response_with_finish("partial", "max_tokens")
 
     with patch(
-        "coda.llm.litellm_provider.litellm.acompletion",
+        "krodo.llm.litellm_provider.litellm.acompletion",
         new_callable=AsyncMock,
         return_value=mock_response,
     ):
@@ -357,7 +357,7 @@ async def test_chat_preserves_stop_reason_normal() -> None:
     mock_response = _make_acompletion_response_with_finish("done", "stop")
 
     with patch(
-        "coda.llm.litellm_provider.litellm.acompletion",
+        "krodo.llm.litellm_provider.litellm.acompletion",
         new_callable=AsyncMock,
         return_value=mock_response,
     ):
@@ -389,7 +389,7 @@ async def test_chat_forwards_max_tokens() -> None:
     mock_response = _make_acompletion_response_with_finish("ok", "stop")
 
     with patch(
-        "coda.llm.litellm_provider.litellm.acompletion",
+        "krodo.llm.litellm_provider.litellm.acompletion",
         new_callable=AsyncMock,
         return_value=mock_response,
     ) as mock_call:

@@ -1,6 +1,6 @@
 """Integration test: CLI end-to-end with a mock LLM provider.
 
-Runs the full `coda` command via Typer's CliRunner (no subprocess fork),
+Runs the full `krodo` command via Typer's CliRunner (no subprocess fork),
 wiring a scripted fake LLM that returns a single tool call and a final reply.
 
 This test validates:
@@ -20,8 +20,8 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from coda.cli.main import app
-from coda.core.types import LLMChunk, Message, ToolCall, ToolDef
+from krodo.cli.main import app
+from krodo.core.types import LLMChunk, Message, ToolCall, ToolDef
 
 # ---------------------------------------------------------------------------
 # Fake LLM provider
@@ -68,7 +68,7 @@ class _FakeLLMProvider:
 def _patch_provider(responses: list[Message]):  # type: ignore[no-untyped-def]
     """Context manager that replaces LiteLLMProvider with the fake."""
     return patch(
-        "coda.cli.main.LiteLLMProvider",
+        "krodo.cli.main.LiteLLMProvider",
         return_value=_FakeLLMProvider(responses),
     )
 
@@ -79,9 +79,9 @@ def _patch_provider(responses: list[Message]):  # type: ignore[no-untyped-def]
 
 
 def test_cli_direct_answer(tmp_path: Path) -> None:
-    """Coda replies with a final answer without any tool calls."""
+    """Krodo replies with a final answer without any tool calls."""
     runner = CliRunner()
-    responses = [Message(role="assistant", content="Hello from Coda!")]
+    responses = [Message(role="assistant", content="Hello from Krodo!")]
 
     with _patch_provider(responses):
         result = runner.invoke(
@@ -90,7 +90,7 @@ def test_cli_direct_answer(tmp_path: Path) -> None:
         )
 
     assert result.exit_code == 0, result.output
-    assert "Hello from Coda!" in result.output
+    assert "Hello from Krodo!" in result.output
 
 
 def test_cli_banner_shows_workspace_root(tmp_path: Path) -> None:
@@ -106,11 +106,11 @@ def test_cli_banner_shows_workspace_root(tmp_path: Path) -> None:
 
     # Banner always contains these landmarks
     assert "workspace" in result.output
-    assert "coda" in result.output.lower()
+    assert "krodo" in result.output.lower()
 
 
 def test_cli_creates_session_files(tmp_path: Path) -> None:
-    """After a run: session JSONL in .coda/sessions/ and app log in .coda/logs/."""
+    """After a run: session JSONL in .krodo/sessions/ and app log in .krodo/logs/."""
     runner = CliRunner()
     responses = [Message(role="assistant", content="logged")]
 
@@ -120,14 +120,14 @@ def test_cli_creates_session_files(tmp_path: Path) -> None:
             ["--root", str(tmp_path), "log this"],
         )
 
-    # Session events → .coda/sessions/*.jsonl
-    sessions_dir = tmp_path / ".coda" / "sessions"
+    # Session events → .krodo/sessions/*.jsonl
+    sessions_dir = tmp_path / ".krodo" / "sessions"
     assert sessions_dir.is_dir()
     session_files = list(sessions_dir.glob("*.jsonl"))
     assert len(session_files) >= 1
 
-    # Application log → .coda/logs/*.log (NOT .jsonl)
-    log_dir = tmp_path / ".coda" / "logs"
+    # Application log → .krodo/logs/*.log (NOT .jsonl)
+    log_dir = tmp_path / ".krodo" / "logs"
     assert log_dir.is_dir()
     log_files = list(log_dir.glob("*.log"))
     assert len(log_files) >= 1
@@ -149,7 +149,7 @@ def test_cli_writes_session_init_header(tmp_path: Path) -> None:
             ["--root", str(tmp_path), "say hi"],
         )
 
-    sessions_dir = tmp_path / ".coda" / "sessions"
+    sessions_dir = tmp_path / ".krodo" / "sessions"
     jsonl_files = list(sessions_dir.glob("*.jsonl"))
     assert len(jsonl_files) >= 1
 
@@ -282,11 +282,11 @@ def _spy_provider(responses: list[Message]):  # type: ignore[no-untyped-def]
     from unittest.mock import MagicMock  # noqa: PLC0415
 
     spy = MagicMock(return_value=_FakeLLMProvider(responses))
-    return patch("coda.cli.main.LiteLLMProvider", spy), spy
+    return patch("krodo.cli.main.LiteLLMProvider", spy), spy
 
 
 def test_cli_max_tokens_default_is_16384(tmp_path: Path) -> None:
-    """No --max-tokens, no CODA_MAX_TOKENS → provider gets max_tokens=16384."""
+    """No --max-tokens, no KRODO_MAX_TOKENS → provider gets max_tokens=16384."""
     runner = CliRunner()
     responses = [Message(role="assistant", content="done")]
     patcher, spy = _spy_provider(responses)
@@ -295,7 +295,7 @@ def test_cli_max_tokens_default_is_16384(tmp_path: Path) -> None:
         result = runner.invoke(
             app,
             ["--root", str(tmp_path), "--approval", "full_auto", "go"],
-            env={"CODA_MAX_TOKENS": ""},  # clear env in case host has it set
+            env={"KRODO_MAX_TOKENS": ""},  # clear env in case host has it set
         )
 
     assert result.exit_code == 0, result.output
@@ -305,7 +305,7 @@ def test_cli_max_tokens_default_is_16384(tmp_path: Path) -> None:
 
 
 def test_cli_max_tokens_env_override(tmp_path: Path) -> None:
-    """CODA_MAX_TOKENS=8192 → LiteLLMProvider gets extra_kwargs={'max_tokens': 8192}."""
+    """KRODO_MAX_TOKENS=8192 → LiteLLMProvider gets extra_kwargs={'max_tokens': 8192}."""
     runner = CliRunner()
     responses = [Message(role="assistant", content="done")]
     patcher, spy = _spy_provider(responses)
@@ -314,7 +314,7 @@ def test_cli_max_tokens_env_override(tmp_path: Path) -> None:
         result = runner.invoke(
             app,
             ["--root", str(tmp_path), "--approval", "full_auto", "go"],
-            env={"CODA_MAX_TOKENS": "8192"},
+            env={"KRODO_MAX_TOKENS": "8192"},
         )
 
     assert result.exit_code == 0, result.output
@@ -323,7 +323,7 @@ def test_cli_max_tokens_env_override(tmp_path: Path) -> None:
 
 
 def test_cli_max_tokens_cli_overrides_env(tmp_path: Path) -> None:
-    """--max-tokens 4096 (with CODA_MAX_TOKENS=8192) → CLI wins, provider gets 4096."""
+    """--max-tokens 4096 (with KRODO_MAX_TOKENS=8192) → CLI wins, provider gets 4096."""
     runner = CliRunner()
     responses = [Message(role="assistant", content="done")]
     patcher, spy = _spy_provider(responses)
@@ -337,7 +337,7 @@ def test_cli_max_tokens_cli_overrides_env(tmp_path: Path) -> None:
                 "--max-tokens", "4096",
                 "go",
             ],
-            env={"CODA_MAX_TOKENS": "8192"},
+            env={"KRODO_MAX_TOKENS": "8192"},
         )
 
     assert result.exit_code == 0, result.output

@@ -1,4 +1,4 @@
-"""Tests for cli/undo.py — coda undo subcommand (M4 PR4)."""
+"""Tests for cli/undo.py — krodo undo subcommand (M4 PR4)."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 import typer
 
-from coda.cli.undo import _emit_undo_event, _find_latest_checkpoint, _resolve_jsonl, undo_command
-from coda.core.types import SessionEventType
+from krodo.cli.undo import _emit_undo_event, _find_latest_checkpoint, _resolve_jsonl, undo_command
+from krodo.core.types import SessionEventType
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -62,17 +62,17 @@ def _write_checkpoint_event(
 
 class TestResolveJsonl:
     def test_returns_none_if_no_logs_dir(self, tmp_path: Path) -> None:
-        result = _resolve_jsonl(tmp_path / ".coda" / "logs", None)
+        result = _resolve_jsonl(tmp_path / ".krodo" / "logs", None)
         assert result is None
 
     def test_returns_none_if_no_jsonl_files(self, tmp_path: Path) -> None:
-        logs = tmp_path / ".coda" / "logs"
+        logs = tmp_path / ".krodo" / "logs"
         logs.mkdir(parents=True)
         result = _resolve_jsonl(logs, None)
         assert result is None
 
     def test_returns_session_file_by_name(self, tmp_path: Path) -> None:
-        logs = tmp_path / ".coda" / "logs"
+        logs = tmp_path / ".krodo" / "logs"
         logs.mkdir(parents=True)
         f = logs / "mysession.jsonl"
         f.write_text("")
@@ -80,7 +80,7 @@ class TestResolveJsonl:
         assert result == f
 
     def test_returns_most_recent_file_when_no_session(self, tmp_path: Path) -> None:
-        logs = tmp_path / ".coda" / "logs"
+        logs = tmp_path / ".krodo" / "logs"
         logs.mkdir(parents=True)
         old = logs / "old.jsonl"
         new = logs / "new.jsonl"
@@ -93,7 +93,7 @@ class TestResolveJsonl:
         assert result == new
 
     def test_returns_none_for_unknown_session(self, tmp_path: Path) -> None:
-        logs = tmp_path / ".coda" / "logs"
+        logs = tmp_path / ".krodo" / "logs"
         logs.mkdir(parents=True)
         (logs / "other.jsonl").write_text("")
         result = _resolve_jsonl(logs, "doesnotexist")
@@ -182,8 +182,8 @@ class TestUndoCommandNonGit:
         assert exc_info.value.exit_code == 1
 
     def test_exits_1_if_no_checkpoint_in_log(self, tmp_path: Path) -> None:
-        # M5.1: sessions now live in .coda/sessions/, not .coda/logs/
-        sessions = tmp_path / ".coda" / "sessions"
+        # M5.1: sessions now live in .krodo/sessions/, not .krodo/logs/
+        sessions = tmp_path / ".krodo" / "sessions"
         sessions.mkdir(parents=True)
         f = sessions / "sess.jsonl"
         # Write a non-checkpoint event
@@ -201,8 +201,8 @@ class TestUndoCommandNonGit:
         assert exc_info.value.exit_code == 1
 
     def test_exits_1_for_non_git_workspace_with_checkpoint(self, tmp_path: Path) -> None:
-        # M5.1: sessions now live in .coda/sessions/, not .coda/logs/
-        sessions = tmp_path / ".coda" / "sessions"
+        # M5.1: sessions now live in .krodo/sessions/, not .krodo/logs/
+        sessions = tmp_path / ".krodo" / "sessions"
         sessions.mkdir(parents=True)
         f = sessions / "sess.jsonl"
         _write_checkpoint_event(f, sha="a" * 40, affected_paths=[str(tmp_path / "hello.py")])
@@ -245,7 +245,7 @@ class TestUndoCommandGit:
         assert stash_sha, "dirty tracked file should produce a stash SHA"
 
         # Write the checkpoint event to the sessions dir (M5.1 migration)
-        sessions = tmp_path / ".coda" / "sessions"
+        sessions = tmp_path / ".krodo" / "sessions"
         sessions.mkdir(parents=True)
         f = sessions / "sess.jsonl"
         _write_checkpoint_event(f, sha=stash_sha, affected_paths=[str(readme)])
@@ -279,8 +279,8 @@ class TestUndoCommandGit:
         ).stdout.strip()
         assert stash_sha
 
-        # M5.1: sessions now live in .coda/sessions/, not .coda/logs/
-        sessions = tmp_path / ".coda" / "sessions"
+        # M5.1: sessions now live in .krodo/sessions/, not .krodo/logs/
+        sessions = tmp_path / ".krodo" / "sessions"
         sessions.mkdir(parents=True)
         f = sessions / "sess.jsonl"
         _write_checkpoint_event(f, sha=stash_sha, affected_paths=[str(readme)])

@@ -7,9 +7,9 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from coda.core.events import SessionEventLogger
-from coda.core.types import SessionEventType
-from coda.memory.store import JsonlSessionStore
+from krodo.core.events import SessionEventLogger
+from krodo.core.types import SessionEventType
+from krodo.memory.store import JsonlSessionStore
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -263,8 +263,8 @@ class TestCorruptLastLine:
 class TestSessionsAndLogsSeparate:
     def test_sessions_path_is_not_logs_path(self, tmp_path: Path) -> None:
         """sessions_dir != logs_dir to prevent mixed-file parsing issues."""
-        sessions_dir = tmp_path / ".coda" / "sessions"
-        logs_dir = tmp_path / ".coda" / "logs"
+        sessions_dir = tmp_path / ".krodo" / "sessions"
+        logs_dir = tmp_path / ".krodo" / "logs"
         assert sessions_dir != logs_dir
 
     def test_session_file_has_jsonl_extension(self, tmp_path: Path) -> None:

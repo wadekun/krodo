@@ -1,4 +1,4 @@
-"""Unit tests for src/coda/obs/logger.py — M4.5 additions."""
+"""Unit tests for src/krodo/obs/logger.py — M4.5 additions."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from coda.obs.logger import configure_logging, get_session_log_path, redact_secrets
+from krodo.obs.logger import configure_logging, get_session_log_path, redact_secrets
 
 # ---------------------------------------------------------------------------
 # redact_secrets
@@ -39,7 +39,7 @@ class TestRedactSecrets:
 class TestConfigureLogging:
     def test_litellm_logger_clamped_to_warning(self, tmp_path: Path) -> None:
         """After configure_logging(), the 'LiteLLM' logger must be WARNING or higher."""
-        from coda.core.workspace import LocalWorkspaceResolver  # noqa: PLC0415
+        from krodo.core.workspace import LocalWorkspaceResolver  # noqa: PLC0415
 
         ws = LocalWorkspaceResolver().resolve(explicit=tmp_path)
         configure_logging(ws, "test-session-warn")
@@ -51,7 +51,7 @@ class TestConfigureLogging:
         )
 
     def test_httpx_logger_clamped(self, tmp_path: Path) -> None:
-        from coda.core.workspace import LocalWorkspaceResolver  # noqa: PLC0415
+        from krodo.core.workspace import LocalWorkspaceResolver  # noqa: PLC0415
 
         ws = LocalWorkspaceResolver().resolve(explicit=tmp_path)
         configure_logging(ws, "test-session-httpx")
@@ -60,14 +60,14 @@ class TestConfigureLogging:
         assert httpx_logger.level >= logging.WARNING
 
     def test_returns_stdlib_logger(self, tmp_path: Path) -> None:
-        from coda.core.workspace import LocalWorkspaceResolver  # noqa: PLC0415
+        from krodo.core.workspace import LocalWorkspaceResolver  # noqa: PLC0415
 
         ws = LocalWorkspaceResolver().resolve(explicit=tmp_path)
         logger = configure_logging(ws, "test-session-type")
         assert isinstance(logger, logging.Logger)
 
     def test_log_file_created(self, tmp_path: Path) -> None:
-        from coda.core.workspace import LocalWorkspaceResolver  # noqa: PLC0415
+        from krodo.core.workspace import LocalWorkspaceResolver  # noqa: PLC0415
 
         ws = LocalWorkspaceResolver().resolve(explicit=tmp_path)
         configure_logging(ws, "test-session-file")
@@ -76,7 +76,7 @@ class TestConfigureLogging:
 
     def test_log_file_has_dot_log_extension(self, tmp_path: Path) -> None:
         """After M5.1, application log uses .log extension (not .jsonl)."""
-        from coda.core.workspace import LocalWorkspaceResolver  # noqa: PLC0415
+        from krodo.core.workspace import LocalWorkspaceResolver  # noqa: PLC0415
 
         ws = LocalWorkspaceResolver().resolve(explicit=tmp_path)
         configure_logging(ws, "test-session-ext")
@@ -87,7 +87,7 @@ class TestConfigureLogging:
         """After M5.1, FileHandler formatter is %(message)s — no INFO:... prefix."""
         import json  # noqa: PLC0415
 
-        from coda.core.workspace import LocalWorkspaceResolver  # noqa: PLC0415
+        from krodo.core.workspace import LocalWorkspaceResolver  # noqa: PLC0415
 
         ws = LocalWorkspaceResolver().resolve(explicit=tmp_path)
         configure_logging(ws, "test-session-json")
@@ -111,9 +111,9 @@ class TestConfigureLogging:
 
 
 class TestGetSessionLogPath:
-    def test_returns_path_under_coda_logs(self, tmp_path: Path) -> None:
-        from coda.core.workspace import LocalWorkspaceResolver  # noqa: PLC0415
+    def test_returns_path_under_krodo_logs(self, tmp_path: Path) -> None:
+        from krodo.core.workspace import LocalWorkspaceResolver  # noqa: PLC0415
 
         ws = LocalWorkspaceResolver().resolve(explicit=tmp_path)
         path = get_session_log_path(ws, "my-session")
-        assert path == ws.root / ".coda" / "logs" / "my-session.log"
+        assert path == ws.root / ".krodo" / "logs" / "my-session.log"

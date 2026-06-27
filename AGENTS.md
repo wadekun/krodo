@@ -1,20 +1,20 @@
-# Project memory: Coda
+# Project memory: Krodo
 
-> This file is auto-loaded into the system prompt of every Coda session running in this repository (see `docs/architecture.md` §5.6). Keep it concise — total budget is 8K tokens.
+> This file is auto-loaded into the system prompt of every Krodo session running in this repository (see `docs/architecture.md` §5.6). Keep it concise — total budget is 8K tokens.
 
 ## What this project is
 
-Coda is a local-first, multi-provider coding agent CLI. We are currently in **Phase 1 (MVP)**: building a usable REPL + headless `coda exec` with 11 tools, three approval modes, automatic git checkpoints, JSONL-backed sessions, and AGENTS.md project memory. We are explicitly **not** building TUI / RAG / Docker sandbox / IDE plugins / Web UI in this phase.
+Krodo is a local-first, multi-provider coding agent CLI. We are currently in **Phase 1 (MVP)**: building a usable REPL + headless `krodo exec` with 11 tools, three approval modes, automatic git checkpoints, JSONL-backed sessions, and AGENTS.md project memory. We are explicitly **not** building TUI / RAG / Docker sandbox / IDE plugins / Web UI in this phase.
 
 The single source of truth for design decisions is [`docs/architecture.md`](docs/architecture.md). When in doubt, read it first; if the design is unclear or wrong, update the doc in the same PR as the code.
 
 ## Engineering rules (the seven principles, see architecture.md §11)
 
 1. Make it work first; optimize later.
-2. **Protocol first** — every core module begins as a `typing.Protocol` in `src/coda/<module>/base.py`.
+2. **Protocol first** — every core module begins as a `typing.Protocol` in `src/krodo/<module>/base.py`.
 3. **Safe by default** — deny unless explicitly allowed; dangerous ops always prompt; sensitive files always ignored.
 4. **Day 1 observability** — every tool call gets a trace span; every LLM call records tokens + cost. PRs without trace/log are not merged.
-5. **Git is the safety net** — checkpoint with `git stash create` before every write; `coda undo` restores.
+5. **Git is the safety net** — checkpoint with `git stash create` before every write; `krodo undo` restores.
 6. Extract shared abstractions only after a pattern repeats across **three** modules.
 7. **Pin major versions** of LLM/agent core dependencies (`litellm>=1.40,<2`, `anthropic` SDK, etc.). Minor upgrades require a PR review and a passing regression run.
 
@@ -23,9 +23,9 @@ The single source of truth for design decisions is [`docs/architecture.md`](docs
 - Python **3.12+ only**. Use modern syntax: `list[int]`, `int | None`, `match` statements, `@override`.
 - Strict typing: `mypy --strict` must pass with zero errors. No `# type: ignore` without an inline reason.
 - Lint: `ruff check` with rules `E F I N W UP B S ASYNC T20`. **Never use `print()` in `src/`** — use `structlog`.
-- `subprocess.run(shell=True)` is forbidden in production code (bandit S602). If you need shell semantics, go through `coda.sandbox.shell.run()` which validates against the dangerous-command policy.
-- Test layout: `tests/unit/` mirrors `src/coda/`; `tests/integration/` for cross-module tests; `tests/e2e/` for full-loop tests with VCR-recorded LLM responses.
-- Coverage target: ≥ 90% for `coda.core` / `coda.llm`; 100% for `coda.tools` / `coda.sandbox`.
+- `subprocess.run(shell=True)` is forbidden in production code (bandit S602). If you need shell semantics, go through `krodo.sandbox.shell.run()` which validates against the dangerous-command policy.
+- Test layout: `tests/unit/` mirrors `src/krodo/`; `tests/integration/` for cross-module tests; `tests/e2e/` for full-loop tests with VCR-recorded LLM responses.
+- Coverage target: ≥ 90% for `krodo.core` / `krodo.llm`; 100% for `krodo.tools` / `krodo.sandbox`.
 - All new tools must:
   1. Define a `pydantic.BaseModel` for arguments.
   2. Return a `ToolResult` (never raise to the loop).
@@ -85,22 +85,22 @@ M3 brings context-window safety and centralised error recovery to the agent loop
 
 ### Token budget (§3.4.1)
 
-`src/coda/core/budget.py` — `BudgetCalculator`:
+`src/krodo/core/budget.py` — `BudgetCalculator`:
 - Total budget = model context window × 0.80
 - Output reserve = total_budget × 0.15
 - `check(messages)` → `BudgetStatus(action: BudgetAction)`: OK / COMPRESS / TRUNCATE / REFUSE
 - `MODEL_CONTEXT_WINDOW` table covers ~20 common models (conservative 95% values)
-- `CODA_TOKEN_RATIO` env var overrides the per-model ratio (Claude = 1.1× default)
+- `KRODO_TOKEN_RATIO` env var overrides the per-model ratio (Claude = 1.1× default)
 
-### Dual compression (`CODA_COMPRESS`)
+### Dual compression (`KRODO_COMPRESS`)
 
-`src/coda/core/compression.py` — `make_compressor(strategy, provider)`:
+`src/krodo/core/compression.py` — `make_compressor(strategy, provider)`:
 - `llm` (default): calls the same LLMProvider to summarise oldest N rounds into a `<SUMMARY>` block; emits `SessionEvent(COMPRESSION)` with cost.
 - `algorithmic`: drops `tool_result` content; keeps tool-call metadata + file paths; zero extra LLM cost.
 - **Pinned context**: most-recent 5 file paths from tool_call args + last user message are **never** compressed.
 - Compression is triggered before each `provider.chat()` call (§4.9 of M3 plan).
 
-### Error recovery (`src/coda/core/recovery.py`)
+### Error recovery (`src/krodo/core/recovery.py`)
 
 `handle(RecoveryContext) -> (RecoveryAction, str)` dispatches 7 scenarios:
 
@@ -120,14 +120,14 @@ M3 brings context-window safety and centralised error recovery to the agent loop
 
 `read_file` caches the SHA-256 of the file at read-time in a module-level `_sha256_cache`.  `edit_file` and `apply_patch` validate the cache before writing; if the on-disk hash differs, they return an error message asking the agent to re-read the file.
 
-### SessionEvent stream (`src/coda/core/events.py`)
+### SessionEvent stream (`src/krodo/core/events.py`)
 
 `SessionEventLogger` wraps the existing JSONL logger with:
 - Typed `emit(SessionEventType, data)` → `SessionEvent`
 - `emit_from(event)` — for compressor-generated events (overwrites session_id + seq)
 - Monotonically-increasing `seq` counter
-- Session events: `<workspace>/.coda/sessions/<session_id>.jsonl`
-- App logs: `<workspace>/.coda/logs/<session_id>.log`
+- Session events: `<workspace>/.krodo/sessions/<session_id>.jsonl`
+- App logs: `<workspace>/.krodo/logs/<session_id>.log`
 - Factory: `SessionEventLogger.from_store(session_id, store)` (preferred) or `from_workspace_path` (legacy)
 
 Events emitted by AgentLoop: `USER_MESSAGE`, `ASSISTANT_MESSAGE`, `TOOL_CALL`, `APPROVAL_DECISION`, `TOOL_RESULT`, `COMPRESSION`, `ERROR`.
@@ -138,26 +138,26 @@ Events emitted by AgentLoop: `USER_MESSAGE`, `ASSISTANT_MESSAGE`, `TOOL_CALL`, `
 - `--summary-window N` — dialogue rounds to compress in one pass (default 2)
 - Startup banner now shows: model context window / compression strategy / max tool calls
 
-## M4: `.codaignore`, Git checkpoint, `coda undo`, diff preview
+## M4: `.krodoignore`, Git checkpoint, `krodo undo`, diff preview
 
-### CodaIgnore (`src/coda/sandbox/ignore.py`)
+### KrodoIgnore (`src/krodo/sandbox/ignore.py`)
 
-`CodaIgnore` merges 4 tiers of ignore rules (backed by `pathspec` gitignore semantics):
+`KrodoIgnore` merges 4 tiers of ignore rules (backed by `pathspec` gitignore semantics):
 
 | Tier | Source | Always active? |
 |------|--------|----------------|
 | 1 | Hard-coded defaults: `.env`, `*.pem`, `id_rsa`, `node_modules/`, `__pycache__/`, etc. | ✅ yes |
 | 2 | Project `.gitignore` | — |
-| 3 | `<workspace_root>/.codaignore` | — |
-| 4 | `~/.config/coda/codaignore` | — |
+| 3 | `<workspace_root>/.krodoignore` | — |
+| 4 | `~/.config/krodo/krodoignore` | — |
 
 **API**: `ignore.match(path) -> MatchResult`; `ignore.is_ignored(path) -> bool`.
 
 All read tools (`read_file`, `list_dir`, `glob`, `grep`) check `ctx.ignore.match()` before accessing the path.  On match, they return `PathIgnoredError: '<path>' is ignored (rule: '<pattern>' from <source>)` as `ToolResult(is_error=True)`.
 
-One `CodaIgnore` instance is constructed at session start and injected via `ToolContext.ignore`.
+One `KrodoIgnore` instance is constructed at session start and injected via `ToolContext.ignore`.
 
-### GitCheckpointManager (`src/coda/sandbox/checkpoint.py`)
+### GitCheckpointManager (`src/krodo/sandbox/checkpoint.py`)
 
 `GitCheckpointManager.create(affected_paths) -> str | None`:
 - Runs `git stash create` (does **not** push to stash stack; working tree untouched).
@@ -177,23 +177,23 @@ Write tools wire-up:
 
 Each checkpoint emits a `CHECKPOINT` `SessionEvent` via `ctx.event_logger`.
 
-### `coda undo` (`src/coda/cli/undo.py`)
+### `krodo undo` (`src/krodo/cli/undo.py`)
 
 Typer subcommand registered in `main.py`:
 
 ```bash
-coda undo [--root <workspace>] [--session <session_id>]
+krodo undo [--root <workspace>] [--session <session_id>]
 ```
 
 Behaviour:
-1. Find the session JSONL (`<workspace>/.coda/logs/<session_id>.jsonl`; defaults to most-recent).
+1. Find the session JSONL (`<workspace>/.krodo/logs/<session_id>.jsonl`; defaults to most-recent).
 2. Find the latest `CHECKPOINT` event (by `seq`).
 3. Call `GitCheckpointManager.restore(sha, affected_paths)`.
 4. Emit `UNDO` `SessionEvent`.
 5. Non-git workspace or no CHECKPOINT → exit 1 with friendly error.
 6. If `affected_paths == [workspace_root]` (shell command scope) → prompt for confirmation.
 
-### Diff preview (`src/coda/cli/diff_preview.py`)
+### Diff preview (`src/krodo/cli/diff_preview.py`)
 
 `render_diff(old, new, path) -> rich.syntax.Syntax`: returns a Rich `Syntax` object showing a unified diff, truncated to 200 lines.
 
@@ -201,7 +201,7 @@ Behaviour:
 
 `TerminalApprovalManager._maybe_render_diff()` renders diffs for `write_file`, `edit_file`, `apply_patch` before the `y/n` approval prompt in `auto_edit` mode.
 
-### Banner update (`src/coda/cli/banner.py`)
+### Banner update (`src/krodo/cli/banner.py`)
 
 Session banner now shows a `git: <root> | none` line reflecting `workspace.git_root`.
 
@@ -215,13 +215,13 @@ The CLI now has two entry shapes — both share the *same* `AgentLoop`
 instance, so history persists naturally:
 
 ```bash
-coda "one-shot task"     # headless: run once and exit (unchanged)
-coda                     # REPL: read → run → repeat
+krodo "one-shot task"     # headless: run once and exit (unchanged)
+krodo                     # REPL: read → run → repeat
 ```
 
 ### Implementation map
 
-- `src/coda/cli/main.py`
+- `src/krodo/cli/main.py`
   - `_build_session_components(...)` → returns a `SessionComponents`
     bundle (workspace + AgentLoop + logger + session_id + event_logger
     + log_path + max_tokens).
@@ -229,7 +229,7 @@ coda                     # REPL: read → run → repeat
     summary (preserves pre-M4.9 behaviour byte-for-byte).
   - `ABORT_REASONS` / `_echo_turn_result` / `_collect_written_paths`
     are module-level so the REPL can reuse them.
-- `src/coda/cli/repl.py`
+- `src/krodo/cli/repl.py`
   - `run_repl(components)` — the multi-turn loop.
   - `input()` runs in `asyncio.to_thread` so it doesn't block the event loop.
   - Exit tokens: `exit` / `quit` / `:q` / `\q`; Ctrl-D (EOFError) exits
@@ -257,11 +257,11 @@ coda                     # REPL: read → run → repeat
 - Cancelling in-flight LLM streaming on single Ctrl-C (requires provider-level
   cancellation)
 
-## M5: Persistence + memory (JSONL sessions, `coda resume`, AGENTS.md, config)
+## M5: Persistence + memory (JSONL sessions, `krodo resume`, AGENTS.md, config)
 
-### JsonlSessionStore (`src/coda/memory/store.py`)
+### JsonlSessionStore (`src/krodo/memory/store.py`)
 
-`JsonlSessionStore` implements the `SessionStore` Protocol backed by one `.jsonl` file per session in `<workspace>/.coda/sessions/`.
+`JsonlSessionStore` implements the `SessionStore` Protocol backed by one `.jsonl` file per session in `<workspace>/.krodo/sessions/`.
 
 - `create_session(session_id, workspace, model, agents_md_hash)` → writes `SESSION_INIT` as `seq=0`.
 - `append_event(session_id, event)` → appends a single JSONL line.
@@ -271,12 +271,12 @@ coda                     # REPL: read → run → repeat
 
 `SessionRow` is a lightweight dataclass (`session_id`, `workspace`, `model`, `started_at`, `event_count`) returned by `list_recent`.
 
-### `coda resume` (`src/coda/cli/resume.py`)
+### `krodo resume` (`src/krodo/cli/resume.py`)
 
 ```bash
-coda resume --list                 # show recent sessions
-coda resume <id-or-prefix>         # replay + continue in REPL
-coda resume --root /path <id>      # explicit workspace
+krodo resume --list                 # show recent sessions
+krodo resume <id-or-prefix>         # replay + continue in REPL
+krodo resume --root /path <id>      # explicit workspace
 ```
 
 Internals:
@@ -285,15 +285,15 @@ Internals:
 3. `replay_events(events, context_manager)` — reconstruct `InMemoryContextManager._history` from `USER_MESSAGE`, `ASSISTANT_MESSAGE`, `TOOL_RESULT`, and `COMPRESSION` events.
 4. Drop into the REPL with the restored history.
 
-`ReplayStats` (`src/coda/memory/replay.py`) tracks `messages_restored`, `tool_results_restored`, and `compressed` (bool).
+`ReplayStats` (`src/krodo/memory/replay.py`) tracks `messages_restored`, `tool_results_restored`, and `compressed` (bool).
 
-### AGENTS.md 3-tier merge (`src/coda/memory/agents_md.py`)
+### AGENTS.md 3-tier merge (`src/krodo/memory/agents_md.py`)
 
 `load_agents_md(workspace, cwd) -> AgentsMdBundle` collects and merges:
 
 | Tier | Path | Droppable on overflow? |
 |------|------|----------------------|
-| 1 (system) | `~/.config/coda/AGENTS.md` | Yes |
+| 1 (system) | `~/.config/krodo/AGENTS.md` | Yes |
 | 2 (project) | `<workspace>/AGENTS.md` | **No** — always kept |
 | 3 (subdir) | `<cwd>/AGENTS.md` … up to workspace root | Yes (outermost first) |
 
@@ -303,30 +303,30 @@ Rules:
 - The bundle's SHA-256 hash is stored in the `SESSION_INIT` event.
 - Content is injected as a `<project_memory>…</project_memory>` user message at index 0 of `_history`.
 
-### Config loading (`src/coda/core/config.py`)
+### Config loading (`src/krodo/core/config.py`)
 
-`CodaConfig` (Pydantic model) covers `model`, `approval`, `max_tool_calls`, `summary_window`, `compress`, `token_ratio`.
+`KrodoConfig` (Pydantic model) covers `model`, `approval`, `max_tool_calls`, `summary_window`, `compress`, `token_ratio`.
 
-`load_config(workspace_root) -> tuple[CodaConfig, list[tuple[Path, str]]]` merges:
+`load_config(workspace_root) -> tuple[KrodoConfig, list[tuple[Path, str]]]` merges:
 
-1. `~/.config/coda/config.toml` (user, TOML)
-2. `<workspace>/.coda/config.yaml` (workspace, YAML — takes precedence over user)
+1. `~/.config/krodo/config.toml` (user, TOML)
+2. `<workspace>/.krodo/config.yaml` (workspace, YAML — takes precedence over user)
 
 Precedence chain: **CLI flag > env var > workspace YAML > user TOML > built-in default**.
 
 `main.py` applies config values to Typer options only when `ParameterSource` (from `click.core`) shows the option is still at its default — CLI flags and env vars always win.
 
-`coda doctor` now shows a **Config sources** section listing which files were found and which keys they contribute.
+`krodo doctor` now shows a **Config sources** section listing which files were found and which keys they contribute.
 
 ## M6: streaming, cost, stdin, slash commands, approval persistence
 
-### Streaming output (`src/coda/llm/streaming.py`, M6.1)
+### Streaming output (`src/krodo/llm/streaming.py`, M6.1)
 
 `ChunkAccumulator` reassembles `LLMChunk`s into a complete assistant `Message`: text deltas are concatenated, tool-call fragments are merged by index (the `arguments` JSON string arrives split across chunks and is `json.loads`-ed at the end, falling back to `{"_raw": ...}` on malformed JSON so the BAD_JSON recovery path still triggers), and the final `usage` / `finish_reason` are captured.
 
 `AgentLoop._call_llm` streams when **both** `LoopConfig.stream` (default True) and the provider's `supports_streaming` attribute are truthy; otherwise it falls back to non-streaming `chat()`. Test mocks don't set the attribute, so they transparently use `chat()` — zero test churn. Text deltas go through the constructor-injected `on_delta` callback (default: Rich raw print, no markup). `TurnResult.streamed` tells `_echo_turn_result` not to print `final_text` a second time.
 
-### Cost tracking (`src/coda/obs/cost.py`, M6.2 — engineering rule #4)
+### Cost tracking (`src/krodo/obs/cost.py`, M6.2 — engineering rule #4)
 
 - `Message.usage` (`{prompt_tokens, completion_tokens, total_tokens}`) and `Message.cost_usd` are filled by `LiteLLMProvider.chat()` via `response.usage` + `litellm.completion_cost`; the streaming path gets usage from the final chunk and the loop estimates cost with `litellm.cost_per_token`. Unknown models: tokens tracked, cost `None`.
 - `CostTracker` accumulates per-session totals; `AgentLoop` emits one `COST_SNAPSHOT` event per turn with `{turn_*, total_*}` token/cost fields.
@@ -334,7 +334,7 @@ Precedence chain: **CLI flag > env var > workspace YAML > user TOML > built-in d
 
 ### Pipe stdin entry (M6.3)
 
-`echo "fix the bug" | coda` runs headless with the piped text as the prompt. `git diff | coda "review this"` appends stdin as a `<stdin>...</stdin>` context block after the prompt. Empty piped stdin (CliRunner test streams) keeps the REPL behaviour — this completes task 1.10's three-entry acceptance (REPL / exec / pipe).
+`echo "fix the bug" | krodo` runs headless with the piped text as the prompt. `git diff | krodo "review this"` appends stdin as a `<stdin>...</stdin>` context block after the prompt. Empty piped stdin (CliRunner test streams) keeps the REPL behaviour — this completes task 1.10's three-entry acceptance (REPL / exec / pipe).
 
 ### REPL slash commands (M6.4)
 
@@ -350,7 +350,7 @@ Handled locally in `repl.py:_dispatch_slash` — the LLM never sees them. Checke
 
 ### Approval trust persistence (M6.5)
 
-`TerminalApprovalManager.export_state()/restore_state()` snapshot `_session_trusted` + `_pattern_trust`. When a decision is `approve_session`/`approve_pattern`, the `APPROVAL_DECISION` event carries the full `state` snapshot (last one wins). `replay_events(events, ctx, approval=...)` re-applies the latest snapshot on resume, so `a`/`p` answers survive `coda resume`. Cross-session global policy stays Phase 3 (`policy.toml`).
+`TerminalApprovalManager.export_state()/restore_state()` snapshot `_session_trusted` + `_pattern_trust`. When a decision is `approve_session`/`approve_pattern`, the `APPROVAL_DECISION` event carries the full `state` snapshot (last one wins). `replay_events(events, ctx, approval=...)` re-applies the latest snapshot on resume, so `a`/`p` answers survive `krodo resume`. Cross-session global policy stays Phase 3 (`policy.toml`).
 
 ## When you (the agent) modify this codebase
 

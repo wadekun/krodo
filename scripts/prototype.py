@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""DEPRECATED — use `coda` CLI instead (Phase 1 M1 complete).
+"""DEPRECATED — use `krodo` CLI instead (Phase 1 M1 complete).
 
 This single-file Phase 0 prototype validated the core ReAct loop against
 LiteLLM tool-use.  It has been superseded by the production implementation in
-``src/coda/``.  It is kept here for historical reference and will be removed
+``src/krodo/``.  It is kept here for historical reference and will be removed
 in Phase 2.
 
 Phase 0 acceptance (architecture.md §8):
@@ -14,13 +14,13 @@ Phase 0 acceptance (architecture.md §8):
 
 Run:
   export ANTHROPIC_API_KEY=sk-ant-...
-  uv run python scripts/prototype.py "explain what src/coda/cli/__init__.py does"
+  uv run python scripts/prototype.py "explain what src/krodo/cli/__init__.py does"
 
   # or interactive REPL
   uv run python scripts/prototype.py
 
 THIS FILE IS INTENTIONALLY THROWAWAY. Phase 1 reimplements every concern behind
-the Protocol contracts in src/coda/. Do NOT import from this script.
+the Protocol contracts in src/krodo/. Do NOT import from this script.
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ except ImportError:
 SCRIPT_DIR = Path(__file__).resolve().parent.parent
 
 ROOT: Path = Path.cwd().resolve()
-CONFIG_PATH: Path = ROOT / ".coda" / "config.yaml"
+CONFIG_PATH: Path = ROOT / ".krodo" / "config.yaml"
 
 DEFAULT_MODEL = "anthropic/claude-sonnet-4-5-20250929"
 DEFAULT_MAX_TURNS = 15
@@ -69,7 +69,7 @@ auto_approve_writes: bool = False  # session-scoped trust
 SHELL_BLOCKLIST_FIRST_TOKEN = {"sudo", "su"}
 SHELL_BLOCKLIST_SUBSTRINGS = ("rm -rf /", "mkfs", ":(){:|:&};:")
 
-SYSTEM_PROMPT_TEMPLATE = """You are Coda Phase-0, a coding agent prototype running locally.
+SYSTEM_PROMPT_TEMPLATE = """You are Krodo Phase-0, a coding agent prototype running locally.
 
 You have THREE tools:
 - read_file(path)            — read a UTF-8 text file, path relative to project root
@@ -464,7 +464,7 @@ def load_model() -> str:
 def _resolve_root(raw: str | None) -> Path:
     if raw:
         candidate = Path(raw).expanduser().resolve()
-    elif env := os.environ.get("CODA_ROOT"):
+    elif env := os.environ.get("KRODO_ROOT"):
         candidate = Path(env).expanduser().resolve()
     else:
         candidate = Path.cwd().resolve()
@@ -477,7 +477,7 @@ def main() -> int:
     global ROOT, CONFIG_PATH
 
     parser = argparse.ArgumentParser(
-        description="Coda Phase-0 prototype (single-file ReAct loop with LiteLLM)."
+        description="Krodo Phase-0 prototype (single-file ReAct loop with LiteLLM)."
     )
     parser.add_argument("prompt", nargs="?", help="initial prompt; omit to enter REPL mode")
     parser.add_argument("--model", default=None, help="override LiteLLM model name")
@@ -485,18 +485,18 @@ def main() -> int:
     parser.add_argument(
         "--root",
         default=None,
-        help="project root the agent operates in (default: $CODA_ROOT or CWD)",
+        help="project root the agent operates in (default: $KRODO_ROOT or CWD)",
     )
     args = parser.parse_args()
 
     ROOT = _resolve_root(args.root)
-    CONFIG_PATH = ROOT / ".coda" / "config.yaml"
+    CONFIG_PATH = ROOT / ".krodo" / "config.yaml"
 
-    model = args.model or os.environ.get("CODA_MODEL") or load_model()
+    model = args.model or os.environ.get("KRODO_MODEL") or load_model()
 
     console.print(
         Panel.fit(
-            f"[bold]Coda Phase-0 Prototype[/bold]\n"
+            f"[bold]Krodo Phase-0 Prototype[/bold]\n"
             f"model:     {model}\n"
             f"root:      {ROOT}\n"
             f"max turns: {args.max_turns}\n\n"

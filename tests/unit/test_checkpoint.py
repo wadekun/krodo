@@ -9,8 +9,8 @@ from unittest.mock import patch
 
 import pytest
 
-from coda.core.workspace import Workspace
-from coda.sandbox.checkpoint import CheckpointError, GitCheckpointManager, shell_command_writes
+from krodo.core.workspace import Workspace
+from krodo.sandbox.checkpoint import CheckpointError, GitCheckpointManager, shell_command_writes
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -20,7 +20,7 @@ from coda.sandbox.checkpoint import CheckpointError, GitCheckpointManager, shell
 def _make_workspace(root: Path, git_root: Path | None = None) -> Workspace:
     return Workspace(
         root=root,
-        config_path=root / ".coda" / "config.yaml",
+        config_path=root / ".krodo" / "config.yaml",
         memory_paths=[],
         git_root=git_root,
         source="cwd",

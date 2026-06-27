@@ -1,4 +1,4 @@
-"""Unit tests for src/coda/core/recovery.py — 7 recovery scenarios."""
+"""Unit tests for src/krodo/core/recovery.py — 7 recovery scenarios."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from coda.core.recovery import (
+from krodo.core.recovery import (
     BAD_JSON,
     CONTEXT_LOSS,
     EACCES,

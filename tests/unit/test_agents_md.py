@@ -1,12 +1,12 @@
-"""Unit tests for src/coda/memory/agents_md.py — 3-tier AGENTS.md merge (M5.3)."""
+"""Unit tests for src/krodo/memory/agents_md.py — 3-tier AGENTS.md merge (M5.3)."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import patch
 
-from coda.core.workspace import LocalWorkspaceResolver
-from coda.memory.agents_md import (
+from krodo.core.workspace import LocalWorkspaceResolver
+from krodo.memory.agents_md import (
     AgentsMdBundle,
     load_agents_md,
 )
@@ -74,8 +74,8 @@ class TestThreeTierMergeOrder:
         #        AGENTS.md     ← tier 3 inner subdir (deepest)
 
         home_dir = tmp_path / "fake-home"
-        (home_dir / ".config" / "coda").mkdir(parents=True)
-        (home_dir / ".config" / "coda" / "AGENTS.md").write_text("# System")
+        (home_dir / ".config" / "krodo").mkdir(parents=True)
+        (home_dir / ".config" / "krodo" / "AGENTS.md").write_text("# System")
 
         (tmp_path / "AGENTS.md").write_text("# Project")
 
@@ -136,10 +136,10 @@ class TestTotalTruncation:
     def test_total_truncation_drops_system_first(self, tmp_path: Path) -> None:
         """When total > 12K tokens, system tier is dropped before project."""
         home_dir = tmp_path / "fake-home"
-        (home_dir / ".config" / "coda").mkdir(parents=True)
+        (home_dir / ".config" / "krodo").mkdir(parents=True)
         # 20K tokens worth of text (4 chars × 20K = 80K chars)
         system_content = "S" * 80_000
-        (home_dir / ".config" / "coda" / "AGENTS.md").write_text(system_content)
+        (home_dir / ".config" / "krodo" / "AGENTS.md").write_text(system_content)
 
         # Project tier: 1K tokens (4K chars)
         project_content = "P" * 4_000

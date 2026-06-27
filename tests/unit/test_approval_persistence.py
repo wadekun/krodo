@@ -18,17 +18,17 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from coda.cli.main import app
-from coda.core.context import InMemoryContextManager
-from coda.core.types import (
+from krodo.cli.main import app
+from krodo.core.context import InMemoryContextManager
+from krodo.core.types import (
     Message,
     SessionEvent,
     SessionEventType,
     ToolCall,
     ToolDef,
 )
-from coda.memory.replay import replay_events
-from coda.sandbox.approval import PatternRule, TerminalApprovalManager
+from krodo.memory.replay import replay_events
+from krodo.sandbox.approval import PatternRule, TerminalApprovalManager
 
 # ---------------------------------------------------------------------------
 # export_state / restore_state
@@ -173,7 +173,7 @@ class TestReplayAppliesApprovalState:
 
 
 # ---------------------------------------------------------------------------
-# E2E: 'a' in session 1 survives coda resume
+# E2E: 'a' in session 1 survives krodo resume
 # ---------------------------------------------------------------------------
 
 
@@ -235,7 +235,7 @@ def test_session_trust_survives_resume(tmp_path: Path) -> None:
         ]
     )
     with (
-        patch("coda.cli.main.LiteLLMProvider", return_value=provider1),
+        patch("krodo.cli.main.LiteLLMProvider", return_value=provider1),
         patch("builtins.input", _script_inputs(["a"])),
     ):
         result1 = runner.invoke(
@@ -245,7 +245,7 @@ def test_session_trust_survives_resume(tmp_path: Path) -> None:
     assert result1.exit_code == 0, result1.output
     assert (tmp_path / "first.txt").read_text() == "one"
 
-    session_files = list((tmp_path / ".coda" / "sessions").glob("*.jsonl"))
+    session_files = list((tmp_path / ".krodo" / "sessions").glob("*.jsonl"))
     assert len(session_files) == 1
     session_id = session_files[0].stem
 
@@ -260,7 +260,7 @@ def test_session_trust_survives_resume(tmp_path: Path) -> None:
     )
 
     # ---------------- Session 2: resume — same tool must NOT prompt ---------
-    from coda.cli.resume import resume_command  # noqa: PLC0415
+    from krodo.cli.resume import resume_command  # noqa: PLC0415
 
     provider2 = _ScriptedProvider(
         [
@@ -281,7 +281,7 @@ def test_session_trust_survives_resume(tmp_path: Path) -> None:
     # Scripted inputs contain NO approval answer: if the prompt appeared it
     # would consume "exit" and the write would never happen.
     with (
-        patch("coda.cli.main.LiteLLMProvider", return_value=provider2),
+        patch("krodo.cli.main.LiteLLMProvider", return_value=provider2),
         patch("builtins.input", _script_inputs(["write second file", "exit"])),
     ):
         resume_command(

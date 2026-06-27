@@ -11,21 +11,21 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from coda.cli.main import app
-from coda.core.events import SessionEventLogger
-from coda.core.loop import AgentLoop
-from coda.core.types import (
+from krodo.cli.main import app
+from krodo.core.events import SessionEventLogger
+from krodo.core.loop import AgentLoop
+from krodo.core.types import (
     Decision,
     Message,
     SessionEventType,
     ToolCall,
     ToolDef,
 )
-from coda.core.workspace import LocalWorkspaceResolver
-from coda.obs.cost import CostTracker, format_token_count
-from coda.sandbox.firewall import LocalSandboxRunner
-from coda.tools.protocols import ToolContext
-from coda.tools.registry import ToolRegistry
+from krodo.core.workspace import LocalWorkspaceResolver
+from krodo.obs.cost import CostTracker, format_token_count
+from krodo.sandbox.firewall import LocalSandboxRunner
+from krodo.tools.protocols import ToolContext
+from krodo.tools.registry import ToolRegistry
 
 # ---------------------------------------------------------------------------
 # CostTracker unit tests
@@ -220,7 +220,7 @@ def test_headless_summary_shows_tokens_and_cost(tmp_path: Path) -> None:
     ]
 
     with patch(
-        "coda.cli.main.LiteLLMProvider",
+        "krodo.cli.main.LiteLLMProvider",
         return_value=_UsageProvider(responses),
     ):
         result = runner.invoke(
@@ -233,7 +233,7 @@ def test_headless_summary_shows_tokens_and_cost(tmp_path: Path) -> None:
     assert "cost $0.0231" in result.output
 
     # COST_SNAPSHOT persisted in the session JSONL
-    session_files = list((tmp_path / ".coda" / "sessions").glob("*.jsonl"))
+    session_files = list((tmp_path / ".krodo" / "sessions").glob("*.jsonl"))
     assert len(session_files) == 1
     types = [
         json.loads(line)["type"]
@@ -248,7 +248,7 @@ def test_headless_summary_omits_cost_line_without_usage(tmp_path: Path) -> None:
     responses = [Message(role="assistant", content="done")]
 
     with patch(
-        "coda.cli.main.LiteLLMProvider",
+        "krodo.cli.main.LiteLLMProvider",
         return_value=_UsageProvider(responses),
     ):
         result = runner.invoke(

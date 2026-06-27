@@ -1,7 +1,7 @@
-"""Integration tests: CLI subcommand routing via CodaGroup.
+"""Integration tests: CLI subcommand routing via KrodoGroup.
 
-Verifies that ``coda resume``, ``coda undo``, and ``coda doctor`` are correctly
-dispatched by the CodaGroup parser — specifically testing the cases that were
+Verifies that ``krodo resume``, ``krodo undo``, and ``krodo doctor`` are correctly
+dispatched by the KrodoGroup parser — specifically testing the cases that were
 broken before (subcommand token eaten by the parent's ``prompt`` Argument).
 
 Uses Typer's CliRunner to exercise the full Click/Typer parsing layer without
@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from coda.cli.main import app
+from krodo.cli.main import app
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -29,7 +29,7 @@ from coda.cli.main import app
 def _patch_resume(side_effect=None):  # type: ignore[no-untyped-def]
     """Patch resume_command so we can verify it was called (and with what args)."""
     return patch(
-        "coda.cli.resume.resume_command",
+        "krodo.cli.resume.resume_command",
         side_effect=side_effect or MagicMock(return_value=None),
     )
 
@@ -37,7 +37,7 @@ def _patch_resume(side_effect=None):  # type: ignore[no-untyped-def]
 def _patch_undo(side_effect=None):  # type: ignore[no-untyped-def]
     """Patch undo_command so we can verify it was called (and with what args)."""
     return patch(
-        "coda.cli.undo.undo_command",
+        "krodo.cli.undo.undo_command",
         side_effect=side_effect or MagicMock(return_value=None),
     )
 
@@ -45,7 +45,7 @@ def _patch_undo(side_effect=None):  # type: ignore[no-untyped-def]
 def _patch_doctor():  # type: ignore[no-untyped-def]
     """Patch _async_doctor (the async impl) so doctor exits cleanly."""
     return patch(
-        "coda.cli.doctor._async_doctor",
+        "krodo.cli.doctor._async_doctor",
         return_value=None,
     )
 
@@ -56,10 +56,10 @@ def _patch_doctor():  # type: ignore[no-untyped-def]
 
 
 class TestResumeRouting:
-    """coda resume subcommand routing."""
+    """krodo resume subcommand routing."""
 
     def test_resume_as_first_token(self, tmp_path: Path) -> None:
-        """``coda resume --root /X`` must route to resume_command, not LLM."""
+        """``krodo resume --root /X`` must route to resume_command, not LLM."""
         runner = CliRunner()
         with _patch_resume() as mock_resume:
             result = runner.invoke(app, ["resume", "--root", str(tmp_path)])
@@ -72,7 +72,7 @@ class TestResumeRouting:
         assert call_kwargs.get("root") == tmp_path
 
     def test_resume_after_global_root_option(self, tmp_path: Path) -> None:
-        """``coda --root /X resume`` — global --root must reach resume_command."""
+        """``krodo --root /X resume`` — global --root must reach resume_command."""
         runner = CliRunner()
         with _patch_resume() as mock_resume:
             result = runner.invoke(app, ["--root", str(tmp_path), "resume"])
@@ -87,7 +87,7 @@ class TestResumeRouting:
         assert call_kwargs.get("root") == tmp_path
 
     def test_resume_with_session_id(self, tmp_path: Path) -> None:
-        """``coda resume abc123`` — session_id must reach resume_command."""
+        """``krodo resume abc123`` — session_id must reach resume_command."""
         runner = CliRunner()
         with _patch_resume() as mock_resume:
             result = runner.invoke(app, ["resume", "abc123"])
@@ -97,7 +97,7 @@ class TestResumeRouting:
         assert call_kwargs.get("session_id") == "abc123"
 
     def test_resume_with_list_flag(self, tmp_path: Path) -> None:
-        """``coda resume --list`` — list_recent flag must reach resume_command."""
+        """``krodo resume --list`` — list_recent flag must reach resume_command."""
         runner = CliRunner()
         with _patch_resume() as mock_resume:
             result = runner.invoke(app, ["resume", "--list"])
@@ -107,7 +107,7 @@ class TestResumeRouting:
         assert call_kwargs.get("list_recent") is True
 
     def test_resume_root_and_session_id(self, tmp_path: Path) -> None:
-        """``coda resume --root /X abc123`` — both args pass through."""
+        """``krodo resume --root /X abc123`` — both args pass through."""
         runner = CliRunner()
         with _patch_resume() as mock_resume:
             result = runner.invoke(app, ["resume", "--root", str(tmp_path), "abc123"])
@@ -133,7 +133,7 @@ class TestResumeRouting:
         assert mock_resume.call_args.kwargs.get("root") == other
 
     def test_model_option_mixed_with_resume(self, tmp_path: Path) -> None:
-        """``coda --model openai/gpt-4o resume --list`` — global option + subcommand option."""
+        """``krodo --model openai/gpt-4o resume --list`` — global option + subcommand option."""
         runner = CliRunner()
         with _patch_resume() as mock_resume:
             result = runner.invoke(
@@ -152,10 +152,10 @@ class TestResumeRouting:
 
 
 class TestUndoRouting:
-    """coda undo subcommand routing."""
+    """krodo undo subcommand routing."""
 
     def test_undo_as_first_token_routes_correctly(self, tmp_path: Path) -> None:
-        """``coda undo`` must call undo_command, NOT enter LLM headless mode."""
+        """``krodo undo`` must call undo_command, NOT enter LLM headless mode."""
         runner = CliRunner()
         with _patch_undo() as mock_undo:
             result = runner.invoke(app, ["undo"])
@@ -166,7 +166,7 @@ class TestUndoRouting:
         )
 
     def test_undo_with_root_option(self, tmp_path: Path) -> None:
-        """``coda undo --root /X`` must pass root to undo_command."""
+        """``krodo undo --root /X`` must pass root to undo_command."""
         runner = CliRunner()
         with _patch_undo() as mock_undo:
             result = runner.invoke(app, ["undo", "--root", str(tmp_path)])
@@ -175,7 +175,7 @@ class TestUndoRouting:
         assert mock_undo.call_args.kwargs.get("root") == tmp_path
 
     def test_undo_with_session_option(self, tmp_path: Path) -> None:
-        """``coda undo --session abc123`` must pass session to undo_command."""
+        """``krodo undo --session abc123`` must pass session to undo_command."""
         runner = CliRunner()
         with _patch_undo() as mock_undo:
             result = runner.invoke(app, ["undo", "--session", "abc123"])
@@ -184,7 +184,7 @@ class TestUndoRouting:
         assert mock_undo.call_args.kwargs.get("session") == "abc123"
 
     def test_undo_after_global_root(self, tmp_path: Path) -> None:
-        """``coda --root /X undo`` must route to undo_command."""
+        """``krodo --root /X undo`` must route to undo_command."""
         runner = CliRunner()
         with _patch_undo() as mock_undo:
             result = runner.invoke(app, ["--root", str(tmp_path), "undo"])
@@ -200,10 +200,10 @@ class TestUndoRouting:
 
 
 class TestDoctorRouting:
-    """coda doctor subcommand routing."""
+    """krodo doctor subcommand routing."""
 
     def test_doctor_as_first_token_routes_correctly(self, tmp_path: Path) -> None:
-        """``coda doctor`` must invoke the doctor subcommand."""
+        """``krodo doctor`` must invoke the doctor subcommand."""
         runner = CliRunner()
         with _patch_doctor() as mock_dr:
             result = runner.invoke(app, ["doctor"])
@@ -213,7 +213,7 @@ class TestDoctorRouting:
         )
 
     def test_doctor_after_global_root(self, tmp_path: Path) -> None:
-        """``coda --root /X doctor`` must route to doctor."""
+        """``krodo --root /X doctor`` must route to doctor."""
         runner = CliRunner()
         with _patch_doctor() as mock_dr:
             result = runner.invoke(app, ["--root", str(tmp_path), "doctor"])
@@ -229,14 +229,14 @@ class TestDoctorRouting:
 
 
 class TestHeadlessAndReplRegression:
-    """Verify that existing headless and REPL modes still work after CodaGroup."""
+    """Verify that existing headless and REPL modes still work after KrodoGroup."""
 
     def _patch_provider_and_components(self):  # type: ignore[no-untyped-def]
         """Patch LiteLLMProvider to avoid real API calls."""
         from collections.abc import AsyncIterator
         from typing import Any
 
-        from coda.core.types import LLMChunk, Message, ToolDef
+        from krodo.core.types import LLMChunk, Message, ToolDef
 
         class _FakeProvider:
             async def chat(
@@ -261,10 +261,10 @@ class TestHeadlessAndReplRegression:
             def count_message_tokens(self, messages: list[Message]) -> int:
                 return 0
 
-        return patch("coda.cli.main.LiteLLMProvider", return_value=_FakeProvider())
+        return patch("krodo.cli.main.LiteLLMProvider", return_value=_FakeProvider())
 
     def test_headless_prompt_passed_through(self, tmp_path: Path) -> None:
-        """``coda "create a mario game"`` → headless mode, prompt intact."""
+        """``krodo "create a mario game"`` → headless mode, prompt intact."""
         runner = CliRunner()
         with self._patch_provider_and_components():
             result = runner.invoke(
@@ -276,7 +276,7 @@ class TestHeadlessAndReplRegression:
         assert "done" in result.output
 
     def test_headless_quoted_resume_prompt(self, tmp_path: Path) -> None:
-        """``coda "resume the work from yesterday"`` → headless (not subcommand)."""
+        """``krodo "resume the work from yesterday"`` → headless (not subcommand)."""
         runner = CliRunner()
         captured_prompt: list[str] = []
 
@@ -285,7 +285,7 @@ class TestHeadlessAndReplRegression:
 
         with (
             self._patch_provider_and_components(),
-            patch("coda.cli.main._run_headless", side_effect=_fake_run),
+            patch("krodo.cli.main._run_headless", side_effect=_fake_run),
         ):
             runner.invoke(
                 app,
@@ -296,7 +296,7 @@ class TestHeadlessAndReplRegression:
         assert captured_prompt[0] == "resume the work from yesterday"
 
     def test_repl_mode_no_args(self, tmp_path: Path) -> None:
-        """``coda`` with no args enters REPL (not subcommand)."""
+        """``krodo`` with no args enters REPL (not subcommand)."""
         runner = CliRunner()
         repl_entered: list[bool] = []
 
@@ -305,7 +305,7 @@ class TestHeadlessAndReplRegression:
 
         with (
             self._patch_provider_and_components(),
-            patch("coda.cli.repl.run_repl", side_effect=_fake_repl),
+            patch("krodo.cli.repl.run_repl", side_effect=_fake_repl),
         ):
             runner.invoke(
                 app,
@@ -317,7 +317,7 @@ class TestHeadlessAndReplRegression:
         assert repl_entered or True  # REPL not reached with CliRunner input; just no crash
 
     def test_help_output_contains_prompt_argument(self) -> None:
-        """``coda --help`` output still shows [PROMPT] positional."""
+        """``krodo --help`` output still shows [PROMPT] positional."""
         runner = CliRunner()
         result = runner.invoke(app, ["--help"])
 
@@ -325,7 +325,7 @@ class TestHeadlessAndReplRegression:
         assert "PROMPT" in result.output or "prompt" in result.output.lower()
 
     def test_help_output_not_routing_to_subcommand(self) -> None:
-        """``coda --help`` must not accidentally call resume/undo/doctor."""
+        """``krodo --help`` must not accidentally call resume/undo/doctor."""
         runner = CliRunner()
         with _patch_resume() as mock_r, _patch_undo() as mock_u, _patch_doctor():
             result = runner.invoke(app, ["--help"])
@@ -347,7 +347,7 @@ class TestExistingPatternRegression:
         from collections.abc import AsyncIterator
         from typing import Any
 
-        from coda.core.types import LLMChunk, Message, ToolDef
+        from krodo.core.types import LLMChunk, Message, ToolDef
 
         class _Fake:
             async def chat(
@@ -372,7 +372,7 @@ class TestExistingPatternRegression:
             def count_message_tokens(self, messages: list[Message]) -> int:
                 return 0
 
-        return patch("coda.cli.main.LiteLLMProvider", return_value=_Fake())
+        return patch("krodo.cli.main.LiteLLMProvider", return_value=_Fake())
 
     @pytest.mark.parametrize(
         "prompt_token",
@@ -402,7 +402,7 @@ class TestExistingPatternRegression:
 
         with (
             self._patch_provider(),
-            patch("coda.cli.main._run_headless", side_effect=_fake_run),
+            patch("krodo.cli.main._run_headless", side_effect=_fake_run),
         ):
             result = runner.invoke(
                 app,

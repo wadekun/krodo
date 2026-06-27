@@ -1,4 +1,4 @@
-"""Unit tests for resume conversation-history display (src/coda/cli/resume.py).
+"""Unit tests for resume conversation-history display (src/krodo/cli/resume.py).
 
 Covers:
 - Empty "asst" lines are replaced with [called <tool> <arg>] summaries.
@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from coda.cli.resume import _history_entries, _key_arg, _print_conversation_history
-from coda.core.types import Message, ToolCall
+from krodo.cli.resume import _history_entries, _key_arg, _print_conversation_history
+from krodo.core.types import Message, ToolCall
 
 
 def _user(content: str) -> Message:
@@ -92,14 +92,14 @@ class TestHistoryEntries:
         assert weight == 1
 
     def test_tool_call_path_relative_to_workspace(self) -> None:
-        root = Path("/private/tmp/coda-sandbox")
+        root = Path("/private/tmp/krodo-sandbox")
         msg = _asst(
             content="",
             tool_calls=[
                 ToolCall(
                     id="1",
                     name="read_file",
-                    arguments={"path": "/private/tmp/coda-sandbox/game.js"},
+                    arguments={"path": "/private/tmp/krodo-sandbox/game.js"},
                 ),
             ],
         )
@@ -110,7 +110,7 @@ class TestHistoryEntries:
         assert "/private" not in line
 
     def test_tool_call_path_outside_workspace_kept(self) -> None:
-        root = Path("/private/tmp/coda-sandbox")
+        root = Path("/private/tmp/krodo-sandbox")
         msg = _asst(
             content="",
             tool_calls=[ToolCall(id="1", name="read_file", arguments={"path": "/etc/hosts"})],
