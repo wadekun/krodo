@@ -87,6 +87,25 @@ def _first_str_arg(args: dict[str, Any]) -> str | None:
     return None
 
 
+# Keys tried in order to build the one-line approval summary.
+# path  → write_file / edit_file
+# command → run_shell
+# message → git_commit
+# patch is intentionally omitted — _maybe_render_diff already shows the full diff.
+_HINT_KEYS: tuple[str, ...] = ("path", "command", "message")
+
+
+def _tool_call_hint(tool_call: ToolCall) -> str:
+    """Extract a one-line hint from *tool_call* arguments for the approval prompt."""
+    for key in _HINT_KEYS:
+        val = tool_call.arguments.get(key)
+        if val and isinstance(val, str):
+            if len(val) > 120:
+                return val[:120] + "…"
+            return val
+    return ""
+
+
 class TerminalApprovalManager:
     """Approval manager for interactive terminal sessions.
 
@@ -181,14 +200,10 @@ class TerminalApprovalManager:
         from rich.console import Console
 
         console = Console()
-        path_hint = tool_call.arguments.get("path", "")
-        cmd_hint = tool_call.arguments.get("cmd", "")
-
+        hint = _tool_call_hint(tool_call)
         summary_parts: list[str] = [f"[bold yellow]{tool_call.name}[/bold yellow]"]
-        if path_hint:
-            summary_parts.append(str(path_hint))
-        elif cmd_hint:
-            summary_parts.append(str(cmd_hint))
+        if hint:
+            summary_parts.append(hint)
 
         console.print(f"\nApproval requested: {' '.join(summary_parts)}")
 
