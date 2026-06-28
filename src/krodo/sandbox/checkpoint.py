@@ -93,6 +93,7 @@ class GitCheckpointManager:
         self._workspace = workspace
         self._logger = logger
         self._git_root: Path | None = workspace.git_root
+        self._non_git_warning_emitted: bool = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -114,9 +115,19 @@ class GitCheckpointManager:
         if self._git_root is None:
             if self._logger:
                 paths_str = [str(p) for p in affected_paths]
-                self._logger.warning(
-                    "checkpoint_skipped: not a git repository, affected_paths=%s", paths_str
-                )
+                # Warn only once per session; subsequent skips are debug-only
+                if not self._non_git_warning_emitted:
+                    self._logger.warning(
+                        "checkpoint_skipped: not a git repository, affected_paths=%s", paths_str
+                    )
+                    self._non_git_warning_emitted = True
+                else:
+                    # Already warned this session - log at debug level
+                    self._logger.debug(
+                        "checkpoint_skipped: not a git repository (already warned), "
+                        "affected_paths=%s",
+                        paths_str,
+                    )
             return None
 
         sha = await self._git_stash_create()
