@@ -98,6 +98,12 @@ async def _async_doctor(
 
     _workspace_root = _Path.cwd()
     _cfg, _cfg_sources = load_config(_workspace_root)
+    # If config supplies a model and the CLI flag was left at its default,
+    # use the config's model — mirrors the logic in main.main() / resume.
+    # Otherwise the doctor pings the hardcoded default, which is misleading
+    # (config shows zai/glm-4.6 but ping goes to anthropic/claude-3-5-sonnet).
+    if _cfg.model is not None and model == _DEFAULT_MODEL:
+        model = _cfg.model
     if _cfg_sources:
         console.print("[bold]config sources[/bold]")
         src_grid = Table.grid(padding=(0, 2))
