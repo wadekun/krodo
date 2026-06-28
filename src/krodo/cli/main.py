@@ -83,6 +83,7 @@ def _version_callback(value: bool) -> None:
         typer.echo(f"krodo {__version__}")
         raise typer.Exit()
 
+
 app = typer.Typer(
     name="krodo",
     cls=KrodoGroup,
