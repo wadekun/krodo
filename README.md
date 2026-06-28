@@ -7,7 +7,7 @@
 
 > A local-first, multi-provider **coding agent CLI**, built with Python 3.12+.
 >
-> Status: 🚧 **Pre-alpha (v0.1.0)** — actively in Phase 1 development. Not yet ready for general use.
+> Status: 🚧 **Pre-alpha (v0.1.0)** — Phase 1 feature-complete (REPL + headless + pipe, 11 tools, JSONL sessions, three approval modes). Phase 2 (TUI, MCP client, tree-sitter symbol index) in planning.
 
 Krodo is an open-source coding agent inspired by Claude Code, Codex CLI, and Aider. It runs locally, talks to your codebase through tools (read / edit / shell / git / grep), and supports any LLM provider via [LiteLLM](https://github.com/BerriAI/litellm) — Anthropic, OpenAI, Gemini, DeepSeek, Qwen, plus local models via Ollama / vLLM.
 
@@ -15,7 +15,7 @@ Krodo is an open-source coding agent inspired by Claude Code, Codex CLI, and Aid
 
 - **Local-first**: your code never leaves your machine except for LLM API calls.
 - **Multi-provider from day 1**: switch between Claude, GPT, Gemini, DeepSeek, Qwen, or local models with a single config flag.
-- **Three CLI shapes, one core**: `krodo` REPL, `krodo exec` headless, `krodo tui` (Phase 2) — all share the same agent loop.
+- **Three CLI shapes, one core**: `krodo` REPL, `krodo "<prompt>"` headless, `krodo tui` (Phase 2) — all share the same agent loop.
 - **Safety as a default**: three approval modes (`read_only` / `auto_edit` / `full_auto`), path firewall, dangerous-command blocklist, automatic git checkpoint before every write.
 - **Modular monolith**: clean Protocol-based interfaces between `core` / `llm` / `tools` / `sandbox` / `memory` / `obs`. Easy to read, easy to contribute to.
 
@@ -39,10 +39,10 @@ For full design rationale, see [`docs/architecture.md`](docs/architecture.md).
 
 ## Quick start
 
-### Try the M6 release (Phase 1 feature-complete)
+### Try the v0.1.0 release (Phase 1 feature-complete)
 
 ```bash
-git clone https://github.com/<org>/krodo
+git clone https://github.com/wadekun/krodo
 cd krodo
 uv sync
 
@@ -60,22 +60,22 @@ uv run krodo --root /tmp/krodo-sandbox
 # you> now add a sound effect when collecting coins
 # you> exit          # or Ctrl-D / Ctrl-C twice
 
-# Pipe (M6): stdin becomes the prompt…
+# Pipe: stdin becomes the prompt…
 echo "create hello.py that prints Hello Krodo" | uv run krodo --root /tmp/krodo-sandbox
 
 # …or extra context when a prompt is given
 git diff | uv run krodo "review this change for bugs"
 ```
 
-Assistant text **streams token-by-token** (M6.1), and every session summary ends with a
-cost line like `tokens     : 12.3k in / 4.1k out | cost $0.0231` (M6.2).
+Assistant text **streams token-by-token**, and every session summary ends with a
+cost line like `tokens     : 12.3k in / 4.1k out | cost $0.0231`.
 
 In REPL mode the conversation history (including everything the agent did
 in the previous turn) is carried over, so follow-ups like "now add X" or
 "fix the bug from before" work naturally.  Exit with `exit` / `quit` /
 `:q`, Ctrl-D, or two consecutive Ctrl-C presses at the prompt.
 
-### REPL slash commands (M6)
+### REPL slash commands
 
 Slash commands are handled locally — they are never sent to the LLM:
 
@@ -88,7 +88,7 @@ Slash commands are handled locally — they are never sent to the LLM:
 | `:resume <id>` | Switch to another session (history is replayed) |
 | `:q` | Quit (same as `exit`) |
 
-### Resuming a previous session (M5)
+### Resuming a previous session
 
 Sessions are persisted automatically. You can pick up right where you left off:
 
@@ -121,7 +121,7 @@ uv tool install git+https://github.com/wadekun/krodo
 krodo --help
 ```
 
-## Available tools (M2, 11 total)
+## Available tools (11 total)
 
 | Tool | Category | Requires approval | Description |
 |:-----|:---------|:-----------------:|:------------|
@@ -137,9 +137,9 @@ krodo --help
 | `run_shell` | Shell | Yes | Execute a shell command inside the workspace sandbox |
 | `git_commit` | Git | Yes | Commit staged files (API keys auto-redacted from message) |
 
-## Context & Recovery (M3)
+## Context & Recovery
 
-M3 introduces token-budget enforcement and dual compression strategies so that long sessions never overflow the model's context window.
+Krodo enforces a token budget and offers dual compression strategies so that long sessions never overflow the model's context window.
 
 ### Token budget (§3.4.1)
 
@@ -181,7 +181,7 @@ KRODO_TOKEN_RATIO=1.15 uv run krodo --model anthropic/claude-3-5-sonnet "..."
 | 6 | Provider rate limit / 5xx | Exponential back-off ×3 (1 s / 2 s / 4 s) |
 | 7 | File permission denied (EACCES) | Skip write; report path + permission bits |
 
-### CLI flags (M3 new)
+### CLI flags
 
 ```bash
 # Limit tool calls per turn (default 25):
@@ -191,7 +191,7 @@ uv run krodo --max-tool-calls 5 "..."
 uv run krodo --summary-window 3 "..."
 ```
 
-## Persistence & Memory (M5)
+## Persistence & Memory
 
 ### Session storage
 
@@ -211,7 +211,7 @@ Place an `AGENTS.md` file anywhere in your project and Krodo will inject it auto
 
 Each file is limited to 8K tokens; total budget is 12K tokens (subdirectory files are dropped first if the limit is hit).
 
-### Configuration files (M5.4)
+### Configuration files
 
 Set defaults in `.krodo/config.yaml` (workspace) or `~/.config/krodo/config.toml` (user-global):
 
@@ -232,9 +232,9 @@ Precedence (highest → lowest): CLI flag > environment variable > `.krodo/confi
 
 Run `krodo doctor` to see which config files are active and what values they contribute.
 
-## .krodoignore & Git checkpoint (M4)
+## .krodoignore & Git checkpoint
 
-M4 adds two safety nets: a 4-tier ignore system and automatic git checkpointing before every write.
+Two safety nets: a 4-tier ignore system and automatic git checkpointing before every write.
 
 ### .krodoignore — 4-tier path filtering (§5.3)
 
@@ -322,7 +322,7 @@ Krodo has three named subcommands — `resume`, `undo`, and `doctor` — alongsi
 Krodo uses [`uv`](https://docs.astral.sh/uv/) for dependency and venv management.
 
 ```bash
-git clone https://github.com/<org>/krodo
+git clone https://github.com/wadekun/krodo
 cd krodo
 uv sync                       # install deps + create .venv
 uv run pytest                 # run tests
@@ -360,7 +360,7 @@ krodo/
 
 ## Contributing
 
-This is a learning + production project. Contributions welcome once Phase 1 stabilizes.
+This is a learning + production project. Contributions welcome — Phase 1 is feature-complete and the CI gate is stable.
 
 Ground rules:
 
