@@ -124,8 +124,13 @@ async def run_repl(components: SessionComponents) -> str | None:
         # the whole REPL).
         # ----------------------------------------------------------------
         turn_idx += 1
+        # "Thinking…" spinner runs in a background thread; it stops the moment
+        # the first streamed token arrives (via on_first_token=status.stop) or
+        # on any error/cancel path via the finally block below.
+        status = _console.status("[dim]Thinking…[/dim]")
+        status.start()
         try:
-            result = await components.loop.run(stripped)
+            result = await components.loop.run(stripped, on_first_token=status.stop)
         except KeyboardInterrupt:
             _console.print("[yellow]Turn cancelled.[/yellow]")
             continue
@@ -135,6 +140,13 @@ async def run_repl(components: SessionComponents) -> str | None:
             _console.print(f"[red]Turn failed: {exc}[/red]")
             components.logger.exception("repl_turn_uncaught_error")
             continue
+        finally:
+            # Safety net: if the turn errored before the first token fired
+            # (provider_error after retries, malformed response, etc.), the
+            # spinner would otherwise keep spinning forever. Rich's
+            # status.stop() is idempotent — safe to call even if on_first_token
+            # already stopped it.
+            status.stop()
 
         # Imported lazily to avoid an import cycle (main -> repl -> main).
         from krodo.cli.main import _echo_turn_result  # noqa: PLC0415

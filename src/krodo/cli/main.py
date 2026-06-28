@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
+from rich.console import Console
 
 from krodo.cli.banner import print_banner
 from krodo.cli.doctor import register_doctor_app
@@ -62,6 +63,12 @@ if TYPE_CHECKING:
     import logging
 
     from krodo.core.loop import TurnResult
+
+# Module-level Rich Console for shared rendering (banners, panels, the
+# prompt→response "Thinking…" spinner). Same instance as banner.py / repl.py
+# pattern; using one console avoids the spinner and streamed text fighting
+# over different output streams.
+_console = Console(stderr=False)
 
 app = typer.Typer(
     name="krodo",
@@ -629,7 +636,15 @@ async def _run_headless(prompt: str, components: SessionComponents) -> None:
     Used by `krodo PROMPT` invocations.  Behaviour is unchanged from the
     pre-M4.9 implementation: print result, then summary, then exit.
     """
-    result = await components.loop.run(prompt)
+    # "Thinking…" spinner: starts before the call, stops on first token via
+    # on_first_token. finally() guarantees cleanup on error paths.
+    status = _console.status("[dim]Thinking…[/dim]")
+    status.start()
+    try:
+        result = await components.loop.run(prompt, on_first_token=status.stop)
+    finally:
+        # Idempotent: safe even if on_first_token already stopped it.
+        status.stop()
     _echo_turn_result(result)
     _print_headless_summary(components, result)
     components.logger.info(

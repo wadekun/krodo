@@ -987,3 +987,110 @@ def test_render_system_prompt_helper_directly() -> None:
 
     # Unchanged when no placeholder
     assert render_system_prompt("plain", registry) == "plain"
+
+
+# ---------------------------------------------------------------------------
+# on_first_token callback (added for v0.1.0 spinner UX)
+# ---------------------------------------------------------------------------
+
+
+class _StreamingProvider:
+    """Provider that streams a fixed sequence of LLMChunks via stream_chat."""
+
+    supports_streaming = True
+
+    def __init__(self, chunks: list[LLMChunk]) -> None:
+        self._chunks = chunks
+        self.model = "test/stream-model"
+
+    async def chat(
+        self,
+        messages: list[Message],
+        tools: list[ToolDef] | None = None,
+        **kwargs: Any,
+    ) -> Message:
+        # Concatenate chunk deltas into one Message (only used if streaming
+        # is disabled in LoopConfig).
+        text = "".join(c.delta_text or "" for c in self._chunks)
+        return Message(role="assistant", content=text)
+
+    async def stream_chat(
+        self,
+        messages: list[Message],
+        tools: list[ToolDef] | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[LLMChunk]:
+        for chunk in self._chunks:
+            yield chunk
+
+    def count_tokens(self, text: str) -> int:
+        return len(text) // 4
+
+    def count_message_tokens(self, messages: list[Message]) -> int:
+        return sum(len(str(m.content)) for m in messages) // 4
+
+
+@pytest.mark.asyncio
+async def test_run_fires_on_first_token_once_before_first_delta(
+    tmp_path: Path,
+) -> None:
+    """on_first_token must fire exactly once, BEFORE any on_delta call."""
+    chunks = [
+        LLMChunk(delta_text="Hello"),
+        LLMChunk(delta_text=", "),
+        LLMChunk(delta_text="world!"),
+        LLMChunk(finish_reason="stop"),
+    ]
+    calls: list[tuple[str, str]] = []
+
+    def on_delta(text: str) -> None:
+        calls.append(("delta", text))
+
+    def on_first_token() -> None:
+        calls.append(("first_token", ""))
+
+    provider = _StreamingProvider(chunks)
+    loop = AgentLoop(
+        provider=provider,  # type: ignore[arg-type]
+        registry=ToolRegistry(),
+        tool_ctx=_ctx(tmp_path),
+        approval=_AutoApprovalManager(),
+        on_delta=on_delta,
+    )
+    await loop.run("hi", on_first_token=on_first_token)
+
+    # Exactly one first_token event
+    first_token_events = [c for c in calls if c[0] == "first_token"]
+    assert len(first_token_events) == 1, f"expected 1 first_token, got {first_token_events}"
+
+    # It fired BEFORE the first delta
+    first_token_idx = calls.index(first_token_events[0])
+    assert first_token_idx == 0, f"first_token must precede all deltas; calls={calls}"
+
+    # And all subsequent events are deltas
+    assert all(c[0] == "delta" for c in calls[first_token_idx + 1 :])
+
+
+@pytest.mark.asyncio
+async def test_run_fires_on_first_token_for_non_streaming_provider(
+    tmp_path: Path,
+) -> None:
+    """When provider doesn't support streaming, on_first_token fires after chat() returns.
+
+    The default _FakeLLMProvider raises NotImplementedError on stream_chat, so
+    AgentLoop falls back to the non-streaming chat() path. on_first_token must
+    still fire (otherwise the CLI spinner would never stop).
+    """
+    calls: list[str] = []
+    provider = _FakeLLMProvider([Message(role="assistant", content="hello")])
+    loop = AgentLoop(
+        provider=provider,  # type: ignore[arg-type]
+        registry=ToolRegistry(),
+        tool_ctx=_ctx(tmp_path),
+        approval=_AutoApprovalManager(),
+        on_delta=lambda _text: calls.append("delta"),
+    )
+    await loop.run("hi", on_first_token=lambda: calls.append("first_token"))
+
+    # Non-streaming path: no deltas fired, but on_first_token fired exactly once.
+    assert calls == ["first_token"], f"unexpected call sequence: {calls}"

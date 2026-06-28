@@ -163,6 +163,7 @@ class AgentLoop:
         self._stall = StallDetector()
         self._event_logger = event_logger
         self._on_delta = on_delta or _default_on_delta
+        self._on_first_token: Callable[[], None] | None = None
         self.cost_tracker = cost_tracker or CostTracker()
         # Render the system prompt once at construction time so the model sees
         # the list of currently-registered tools without anyone having to
@@ -199,7 +200,23 @@ class AgentLoop:
                 pass
 
         response = await self._provider.chat(messages=messages, tools=tool_defs)
+        # Non-streaming path: _on_delta never fires, so emit on_first_token
+        # here to satisfy callers (e.g. the CLI spinner) that wait for "the
+        # model has produced output". Fires at most once per turn.
+        self._maybe_fire_first_token()
         return response, False
+
+    def _maybe_fire_first_token(self) -> None:
+        """Invoke ``_on_first_token`` once, then drop the reference.
+
+        Centralising the "fire and clear" here keeps both streaming and
+        non-streaming paths consistent and avoids double-fire if a turn
+        somehow produces both deltas and a chat() response.
+        """
+        cb = self._on_first_token
+        if cb is not None:
+            self._on_first_token = None
+            cb()
 
     async def _stream_llm(
         self,
@@ -219,6 +236,10 @@ class AgentLoop:
         streamed_text = False
         async for chunk in stream:
             if chunk.delta_text:
+                # Fire on_first_token before the first delta renders so the
+                # CLI spinner can stop cleanly without overlapping the
+                # streamed text.
+                self._maybe_fire_first_token()
                 self._on_delta(chunk.delta_text)
                 streamed_text = True
             accumulator.add(chunk)
@@ -226,8 +247,21 @@ class AgentLoop:
             self._on_delta("\n")
         return accumulator.to_message(), streamed_text
 
-    async def run(self, user_input: str) -> TurnResult:
-        """Execute one full agent turn for *user_input*."""
+    async def run(
+        self,
+        user_input: str,
+        *,
+        on_first_token: Callable[[], None] | None = None,
+    ) -> TurnResult:
+        """Execute one full agent turn for *user_input*.
+
+        ``on_first_token`` is an optional per-turn callback invoked exactly
+        once, immediately before the first streamed text delta is rendered
+        (or, for non-streaming providers, right after ``chat()`` returns).
+        The CLI uses it to stop its "Thinking…" spinner the moment real
+        output begins. ``None`` (default) disables the hook entirely.
+        """
+        self._on_first_token = on_first_token
         self.context_manager.add_user_input(user_input)
         self._emit(SessionEventType.USER_MESSAGE, content=user_input)
         self._stall.reset()
