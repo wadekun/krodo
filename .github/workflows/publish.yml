@@ -1,6 +1,8 @@
 name: Publish to PyPI
 
-# Triggered when a GitHub Release is published (not created/drafted/edited).
+# Triggered when a GitHub Release is published (not created/drafted/edited),
+# OR manually via `gh workflow run publish.yml -f ref=<tag>`.
+#
 # Uses PyPI Trusted Publishers (OIDC) — no API tokens or secrets needed.
 #
 # PyPI publisher config (set at https://pypi.org/manage/account/publishing/):
@@ -10,15 +12,26 @@ name: Publish to PyPI
 #   Environment:   (leave blank unless you add `environment:` below)
 #
 # First release creates the `krodo` PyPI project automatically.
+#
+# Why workflow_dispatch exists: GitHub's `release.published` event can be
+# suppressed when a release is deleted + re-created with the same tag (the
+# event system treats this as a no-op for an unchanged tag). The manual
+# trigger lets us recover from that without needing to cut a new tag.
 
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref/tag to publish (e.g. v0.1.0)'
+        required: true
+        default: 'v0.1.0'
 
-# Only one publish at a time per tag — a re-publish of the same tag waits
-# for the in-flight run instead of racing.
+# Only one publish at a time per ref — manual and release-triggered runs on
+# the same tag queue, they don't race.
 concurrency:
-  group: publish-${{ github.ref }}
+  group: publish-${{ inputs.ref || github.event.release.tag_name }}
   cancel-in-progress: false
 
 permissions:
@@ -26,11 +39,16 @@ permissions:
 
 jobs:
   build:
-    name: Build distributions + run full CI gate
+    name: Build ${{ inputs.ref || github.event.release.tag_name }} + run full CI gate
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        # When triggered via workflow_dispatch, checkout the requested tag.
+        # When triggered via release.published, checkout the tag GitHub
+        # already implicit passes. Either way, build from the tagged tree.
+        with:
+          ref: ${{ inputs.ref || github.event.release.tag_name }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
