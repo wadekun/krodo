@@ -18,20 +18,14 @@ Usage::
 
 from __future__ import annotations
 
-from importlib.metadata import PackageNotFoundError, version
-
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
+from krodo import __version__
 from krodo.core.workspace import Workspace
 
 _console = Console(stderr=False)
-
-try:
-    _VERSION = version("krodo")
-except PackageNotFoundError:
-    _VERSION = "dev"
 
 
 def print_banner(
@@ -64,7 +58,7 @@ def print_banner(
 
     panel = Panel(
         content,
-        title=f"[bold white]krodo {_VERSION}[/bold white]",
+        title=f"[bold white]krodo {__version__}[/bold white]",
         border_style="cyan",
         expand=False,
     )

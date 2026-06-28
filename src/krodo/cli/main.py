@@ -70,6 +70,19 @@ if TYPE_CHECKING:
 # over different output streams.
 _console = Console(stderr=False)
 
+
+def _version_callback(value: bool) -> None:
+    """`--version` / `-V` eager callback: print version and exit immediately.
+
+    Eager means Typer evaluates this before any other option or subcommand
+    dispatch, so `krodo --version` works even with extra args on the line.
+    """
+    if value:
+        from krodo import __version__  # noqa: PLC0415
+
+        typer.echo(f"krodo {__version__}")
+        raise typer.Exit()
+
 app = typer.Typer(
     name="krodo",
     cls=KrodoGroup,
@@ -222,6 +235,14 @@ def print_session_summary(components: SessionComponents, turns: int | None = Non
 def main(
     ctx: typer.Context,
     prompt: str | None = typer.Argument(None, help="Task to perform (omit to enter REPL)"),
+    version: bool = typer.Option(  # noqa: ARG001 — handled by callback
+        None,
+        "--version",
+        "-V",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show version and exit.",
+    ),
     root: Path | None = typer.Option(
         None,
         "--root",

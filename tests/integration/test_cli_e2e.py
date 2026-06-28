@@ -131,6 +131,29 @@ def test_cli_banner_shows_model(tmp_path: Path) -> None:
     assert "deepseek/deepseek-v4-flash" in result.output
 
 
+def test_cli_version_long_flag() -> None:
+    """`krodo --version` prints `krodo <version>` and exits 0 without contacting any LLM."""
+    runner = CliRunner()
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0, result.output
+    assert "krodo" in result.output.lower()
+    # __version__ resolves to "dev" when not pip-installed (test env), or to
+    # the installed version on a real install. Either way, it should appear.
+    from krodo import __version__
+
+    assert __version__ in result.output
+
+
+def test_cli_version_short_flag() -> None:
+    """`krodo -V` is the short alias for `--version`."""
+    runner = CliRunner()
+    result = runner.invoke(app, ["-V"])
+    assert result.exit_code == 0, result.output
+    from krodo import __version__
+
+    assert __version__ in result.output
+
+
 def test_cli_creates_session_files(tmp_path: Path) -> None:
     """After a run: session JSONL in .krodo/sessions/ and app log in .krodo/logs/."""
     runner = CliRunner()
