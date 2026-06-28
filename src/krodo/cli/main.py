@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json as _json
 import uuid
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -77,6 +78,20 @@ register_resume_app(app)
 register_doctor_app(app)
 
 _DEFAULT_MODEL = "anthropic/claude-3-5-sonnet-20241022"
+
+# LiteLLM issue #14011: Anthropic server-side web_search returns `server_tool_use`
+# content blocks that LiteLLM's Pydantic response models don't yet fully
+# recognise. Pydantic emits a UserWarning ("PydanticSerializationUnexpectedValue:
+# Expected `ServerToolUse` ...") when re-serialising these blocks. The warning is
+# non-fatal — serialization still completes, krodo sees the tool_use content
+# correctly — but it spams stderr on every Claude web-search call. Filter this
+# specific message until LiteLLM ships the fix upstream. Remove the filter once
+# we upgrade to a LiteLLM version that expands the Anthropic response union.
+warnings.filterwarnings(
+    "ignore",
+    message=r".*PydanticSerializationUnexpectedValue.*ServerToolUse.*",
+    category=UserWarning,
+)
 
 
 # ---------------------------------------------------------------------------
