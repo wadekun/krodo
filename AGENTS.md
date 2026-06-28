@@ -352,6 +352,50 @@ Handled locally in `repl.py:_dispatch_slash` — the LLM never sees them. Checke
 
 `TerminalApprovalManager.export_state()/restore_state()` snapshot `_session_trusted` + `_pattern_trust`. When a decision is `approve_session`/`approve_pattern`, the `APPROVAL_DECISION` event carries the full `state` snapshot (last one wins). `replay_events(events, ctx, approval=...)` re-applies the latest snapshot on resume, so `a`/`p` answers survive `krodo resume`. Cross-session global policy stays Phase 3 (`policy.toml`).
 
+## M7: Brand rename + v0.1.0 release (Phase 1 closeout)
+
+M7 closed out Phase 1. The work happened in five independent commits, each independently revertable:
+
+| Commit | Type | What |
+|--------|------|------|
+| `ce24ef6` | `fix(mypy)` | cleared 10 mypy `--strict` errors (`types-PyYAML` stubs + streaming `int(object)` overloads + bare `dict`/`list` generics in CLI helpers + 2 stale `# type: ignore`) |
+| `295ce49` | `feat(rename)` | full rebrand `Coda → krodo`: `src/coda/` → `src/krodo/`, ~826 coda/Coda/CODA references across 84+ files (perl 3-case replace), pyproject 5 fields, `.codaignore` → `.krodoignore`, all docs/AGENTS/README/architecture |
+| `0c5c607` | `docs` | QUICKSTART / CONTRIBUTING / SECURITY / CHANGELOG + README polish (4 badges, doc table, PyPI-deferred notice) |
+| `634d051` | `fix(rename)` | cleanup residuals missed by initial perl pass: `.gitignore` patterns + LICENSE copyright holder + physical `.coda/` → `.krodo/` directory on disk |
+| `05a82bd` | `fix(ci)` | ruff format backfill (10 pre-existing files) + correct repo owner `liangck` → `wadekun` across all docs |
+| `90aa414` (PR #1 merge) | merge | M7 dogfood: krodo fixed its own `checkpoint_skipped` warning noise (non-git workspaces now warn once per session, then debug) — `836d829` |
+
+### Why the rename
+
+- PyPI `coda` was occupied by an unrelated 2017 file-tagging package (claiming both `import coda` and the `coda` console script).
+- GitHub `agno-agi/coda` is an active same-category coding-agent project (Slack surface, well-funded); we would have lost brand discovery.
+- `krodo` verified clean across PyPI / npm / `.ai` / `.dev` / `.com`, no negative etymology.
+
+### Release flow (this repo's pattern)
+
+1. Bump `version` in `pyproject.toml`.
+2. Move `[Unreleased]` → `[x.y.z] — YYYY-MM-DD` in `CHANGELOG.md`.
+3. `git commit -m "chore(release): vx.y.z"`.
+4. `git tag vx.y.z && git push --tags`.
+5. `gh release create vx.y.z --notes-from-tag` (or paste CHANGELOG section).
+6. PyPI upload is **deferred past v0.1.0** (distribution name `krodo` locked; first release via GitHub only; PyPI in a minor follow-up).
+
+### Documentation index (where things live)
+
+| Doc | Path | Audience |
+|-----|------|---------|
+| Project overview + roadmap | `README.md` | everyone |
+| 5-minute install | `docs/QUICKSTART.md` | new users |
+| Design baseline (source of truth) | `docs/architecture.md` | contributors |
+| Auto-loaded project memory | `AGENTS.md` (this file) | krodo + contributors |
+| Dev setup + CI gate + PR flow | `CONTRIBUTING.md` | contributors |
+| Threat model + reporting | `SECURITY.md` | users + researchers |
+| Milestone-by-milestone changes | `CHANGELOG.md` | everyone |
+
+### M7 lesson learned: full-repo rename coverage
+
+The initial rename commit (`295ce49`) ran perl 3-case replacement on a hardcoded list of files (`pyproject` / `README` / `AGENTS` / `architecture` / `ci.yml` / `.krodoignore`). That missed `.gitignore`, `LICENSE`, and the on-disk `.coda/` directory — caught only after CI failed on the first GitHub push. For future full-repo renames, use `rg -l 'pattern'` to enumerate every hit first, then exclude historical archives and intentional references.
+
 ## When you (the agent) modify this codebase
 
 - Always `read_file` before `edit_file` — never guess file contents.
