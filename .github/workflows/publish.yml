@@ -1,0 +1,91 @@
+name: Publish to PyPI
+
+# Triggered when a GitHub Release is published (not created/drafted/edited).
+# Uses PyPI Trusted Publishers (OIDC) — no API tokens or secrets needed.
+#
+# PyPI publisher config (set at https://pypi.org/manage/account/publishing/):
+#   Owner:         wadekun
+#   Repository:    krodo
+#   Workflow name: publish.yml
+#   Environment:   (leave blank unless you add `environment:` below)
+#
+# First release creates the `krodo` PyPI project automatically.
+
+on:
+  release:
+    types: [published]
+
+# Only one publish at a time per tag — a re-publish of the same tag waits
+# for the in-flight run instead of racing.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build distributions + run full CI gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies (frozen lockfile)
+        run: uv sync --all-groups --frozen
+
+      # Run the full CI gate before shipping — never publish a broken build.
+      - name: Lint (ruff)
+        run: uv run ruff check .
+      - name: Format check (ruff)
+        run: uv run ruff format --check .
+      - name: Type check (mypy --strict)
+        run: uv run mypy src
+      - name: Tests with coverage
+        run: uv run pytest --no-header -q
+
+      - name: Build wheel + sdist
+        run: uv build
+
+      - name: Upload distributions as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish to PyPI (Trusted Publisher)
+    needs: build
+    runs-on: ubuntu-latest
+    # `permissions: id-token: write` is required for PyPI Trusted Publishers
+    # (OIDC). We scope it to this job only — the build job above has the
+    # default read-only permissions.
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Verify artifacts
+        run: ls -la dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # No password / token — PyPI Trusted Publishers authenticates via
+        # OIDC using the (owner, repo, workflow-name) triple configured on
+        # pypi.org.
