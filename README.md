@@ -31,6 +31,8 @@ For full design rationale, see [`docs/architecture.md`](docs/architecture.md).
 | 1 M3 | Context management (token budget + dual compression) + 7 recovery scenarios | ✅ done |
 | 1 M4 | `.krodoignore` + git checkpoint + `krodo undo` + diff preview | ✅ done |
 | 1 M5 | Persistence + memory: JSONL sessions, `krodo resume`, AGENTS.md, config files | ✅ done |
+| 1 M6 | Streaming + cost tracking + pipe stdin + REPL slash commands + approval persistence | ✅ done |
+| 1 M7 | Brand rename (Coda → krodo) + mypy strict clean + docs quartet + GitHub release + dogfood PR | ✅ done |
 | 2 | tree-sitter symbol index, repo-map, Textual TUI, MCP client | — |
 | 3 | OS-level sandbox, evaluation harness, OpenTelemetry / Langfuse | — |
 | 4 | Production-grade: Rust hot paths, single-binary distribution, LiteLLM Proxy | — |
