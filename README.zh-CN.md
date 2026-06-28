@@ -6,10 +6,11 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![Status: Pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange.svg)](CHANGELOG.md)
+[![PyPI](https://img.shields.io/pypi/v/krodo.svg)](https://pypi.org/project/krodo/)
 
 > 一个**本地优先、多 Provider** 的命令行 coding agent,基于 Python 3.12+。
 >
-> 状态: 🚧 **Pre-alpha (v0.1.0)** — Phase 1 功能已完整(REPL + headless + pipe 三入口,11 个工具,JSONL 会话,三档审批模式)。Phase 2(TUI、MCP client、tree-sitter 符号索引)规划中。
+> 状态: 🚧 **Pre-alpha (v0.1.1)** — Phase 1 功能完整 & 已上 PyPI(REPL + headless + pipe 三入口,11 个工具,JSONL 会话,三档审批模式)。Phase 2(TUI、MCP client、tree-sitter 符号索引)规划中。
 
 Krodo 是一个开源 coding agent,灵感来自 Claude Code、Codex CLI 和 Aider。它本地运行,通过工具(read / edit / shell / git / grep)操作你的代码库,通过 [LiteLLM](https://github.com/BerriAI/litellm) 支持任意 LLM provider — Anthropic、OpenAI、Gemini、DeepSeek、Qwen,以及通过 Ollama / vLLM 跑本地模型。
 
@@ -41,32 +42,29 @@ Krodo 是一个开源 coding agent,灵感来自 Claude Code、Codex CLI 和 Aide
 
 ## Quick start
 
-### 试用 v0.1.0(Phase 1 功能完整版)
+### 试用 v0.1.1(Phase 1 功能完整版)
 
 ```bash
-git clone https://github.com/wadekun/krodo
-cd krodo
-uv sync
-
-export ANTHROPIC_API_KEY=sk-ant-...   # 或 OPENAI_API_KEY / ZAI_API_KEY / DEEPSEEK_API_KEY / ...
+uv tool install krodo                 # 或: pipx install krodo
+export ANTHROPIC_API_KEY=sk-ant-...   # 或 OPENAI_API_KEY / ZAI_API_KEY / ...
 
 mkdir -p /tmp/krodo-sandbox
 
 # Headless:跑一个任务后退出
-uv run krodo --root /tmp/krodo-sandbox "create hello.py that prints Hello Krodo, then run it"
+krodo --root /tmp/krodo-sandbox "create hello.py that prints Hello Krodo, then run it"
 
 # REPL:不传 prompt,进入交互式多轮对话
-uv run krodo --root /tmp/krodo-sandbox
+krodo --root /tmp/krodo-sandbox
 # you> create a simple mario game
 # (assistant works, then…)
 # you> now add a sound effect when collecting coins
 # you> exit          # 或 Ctrl-D / Ctrl-C 两次
 
 # Pipe:stdin 作为 prompt...
-echo "create hello.py that prints Hello Krodo" | uv run krodo --root /tmp/krodo-sandbox
+echo "create hello.py that prints Hello Krodo" | krodo --root /tmp/krodo-sandbox
 
 # ...或作为额外上下文(有 prompt 时)
-git diff | uv run krodo "review this change for bugs"
+git diff | krodo "review this change for bugs"
 ```
 
 助手文本**token-by-token 流式输出**,每次会话结束 summary 会显示成本行:
@@ -107,17 +105,32 @@ krodo resume --root /tmp/krodo-sandbox a3f2b1
 `krodo resume` 会把存储的事件历史 replay 进新的 REPL,所以模型记得上次的所有事 —
 改过哪些文件、调用过什么工具、对话内容。
 
-### Stable release(v0.1 — 暂未上 PyPI)
+### 安装(PyPI)
 
-PyPI 上传**推迟到 v0.1.0 之后**(发行名 `krodo` 锁定中)。首版走 GitHub Release +
-`uv tool install git+https://github.com/wadekun/krodo`。PyPI 会在名字锁定后的小版本补上,
-状态见 [`CHANGELOG.md`](CHANGELOG.md)。
-
-期间从 GitHub 安装:
+Krodo 已在 PyPI 上线。选你顺手的工具:
 
 ```bash
-uv tool install git+https://github.com/wadekun/krodo
+uv tool install krodo                # 推荐(快、隔离)
+# 或
+pipx install krodo                   # 同样好用
+# 或
+pip install krodo                    # 能用,但 pip 全局安装容易跟其他包打架
+```
+
+验证:
+
+```bash
+krodo --version                      # krodo <version>
 krodo --help
+```
+
+如果从源码跑(开发用):
+
+```bash
+git clone https://github.com/wadekun/krodo
+cd krodo
+uv sync                              # 创建 .venv,装运行时 + dev deps
+uv run krodo --help                  # 未 pip 安装,需要 `uv run`
 ```
 
 ## 可用工具(共 11 个)
@@ -163,10 +176,10 @@ Truncate at    = 95% of budget
 
 ```bash
 # 用算法压缩(不调额外 LLM):
-KRODO_COMPRESS=algorithmic uv run krodo "..."
+KRODO_COMPRESS=algorithmic krodo "..."
 
 # 覆盖 Claude 的 token ratio(默认 1.1x,tiktoken 会少算):
-KRODO_TOKEN_RATIO=1.15 uv run krodo --model anthropic/claude-3-5-sonnet "..."
+KRODO_TOKEN_RATIO=1.15 krodo --model anthropic/claude-3-5-sonnet "..."
 ```
 
 ### 错误恢复(7 种场景,§7.5)
@@ -185,10 +198,10 @@ KRODO_TOKEN_RATIO=1.15 uv run krodo --model anthropic/claude-3-5-sonnet "..."
 
 ```bash
 # 限制单 turn 工具调用次数(默认 25):
-uv run krodo --max-tool-calls 5 "..."
+krodo --max-tool-calls 5 "..."
 
 # 设置压缩窗口(一次压缩多少轮对话):
-uv run krodo --summary-window 3 "..."
+krodo --summary-window 3 "..."
 ```
 
 ## 持久化与记忆

@@ -378,7 +378,7 @@ M7 closed out Phase 1. The work happened in five independent commits, each indep
 3. `git commit -m "chore(release): vx.y.z"`.
 4. `git tag vx.y.z && git push --tags`.
 5. `gh release create vx.y.z --notes-from-tag` (or paste CHANGELOG section).
-6. PyPI upload is **deferred past v0.1.0** (distribution name `krodo` locked; first release via GitHub only; PyPI in a minor follow-up).
+6. PyPI auto-publishes via Trusted Publishers (OIDC) on `release.published`. The `krodo` distribution name was verified clean before v0.1.0. The publish workflow (`.github/workflows/publish.yml`) also has `workflow_dispatch` as a manual fallback, because `release.published` can be suppressed when a release is deleted + re-created with the same tag.
 
 ### Documentation index (where things live)
 

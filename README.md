@@ -6,10 +6,11 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![Status: Pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange.svg)](CHANGELOG.md)
+[![PyPI](https://img.shields.io/pypi/v/krodo.svg)](https://pypi.org/project/krodo/)
 
 > A local-first, multi-provider **coding agent CLI**, built with Python 3.12+.
 >
-> Status: 🚧 **Pre-alpha (v0.1.0)** — Phase 1 feature-complete (REPL + headless + pipe, 11 tools, JSONL sessions, three approval modes). Phase 2 (TUI, MCP client, tree-sitter symbol index) in planning.
+> Status: 🚧 **Pre-alpha (v0.1.1)** — Phase 1 feature-complete & on PyPI (REPL + headless + pipe, 11 tools, JSONL sessions, three approval modes). Phase 2 (TUI, MCP client, tree-sitter symbol index) in planning.
 
 Krodo is an open-source coding agent inspired by Claude Code, Codex CLI, and Aider. It runs locally, talks to your codebase through tools (read / edit / shell / git / grep), and supports any LLM provider via [LiteLLM](https://github.com/BerriAI/litellm) — Anthropic, OpenAI, Gemini, DeepSeek, Qwen, plus local models via Ollama / vLLM.
 
@@ -41,32 +42,29 @@ For full design rationale, see [`docs/architecture.md`](docs/architecture.md).
 
 ## Quick start
 
-### Try the v0.1.0 release (Phase 1 feature-complete)
+### Try the v0.1.1 release (Phase 1 feature-complete)
 
 ```bash
-git clone https://github.com/wadekun/krodo
-cd krodo
-uv sync
-
-export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY / KRODO_API_KEY
+uv tool install krodo                 # or: pipx install krodo
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY / ZAI_API_KEY / ...
 
 mkdir -p /tmp/krodo-sandbox
 
 # Headless: run one task and exit
-uv run krodo --root /tmp/krodo-sandbox "create hello.py that prints Hello Krodo, then run it"
+krodo --root /tmp/krodo-sandbox "create hello.py that prints Hello Krodo, then run it"
 
 # REPL: omit the prompt to enter interactive multi-turn mode
-uv run krodo --root /tmp/krodo-sandbox
+krodo --root /tmp/krodo-sandbox
 # you> create a simple mario game
 # (assistant works, then…)
 # you> now add a sound effect when collecting coins
 # you> exit          # or Ctrl-D / Ctrl-C twice
 
 # Pipe: stdin becomes the prompt…
-echo "create hello.py that prints Hello Krodo" | uv run krodo --root /tmp/krodo-sandbox
+echo "create hello.py that prints Hello Krodo" | krodo --root /tmp/krodo-sandbox
 
 # …or extra context when a prompt is given
-git diff | uv run krodo "review this change for bugs"
+git diff | krodo "review this change for bugs"
 ```
 
 Assistant text **streams token-by-token**, and every session summary ends with a
@@ -108,19 +106,32 @@ krodo resume --root /tmp/krodo-sandbox a3f2b1
 `krodo resume` replays the stored conversation history into a fresh REPL, so the model
 remembers everything from the prior session — files edited, tools called, and dialogue.
 
-### Stable release (v0.1 — not yet on PyPI)
+### Install (PyPI)
 
-The PyPI upload is **deferred past v0.1.0** while the `krodo` distribution
-name finalises. First releases are GitHub Release + `uv tool install
-git+https://github.com/wadekun/krodo`. PyPI upload will land in a minor
-release after the name is locked; see [`CHANGELOG.md`](CHANGELOG.md) for
-status.
-
-Install from GitHub in the meantime:
+Krodo is on PyPI. Pick your favourite installer:
 
 ```bash
-uv tool install git+https://github.com/wadekun/krodo
+uv tool install krodo                # recommended (fast, isolated)
+# or
+pipx install krodo                   # equally good
+# or
+pip install krodo                    # works, but pip's global installs can clash
+```
+
+Verify:
+
+```bash
+krodo --version                      # krodo <version>
 krodo --help
+```
+
+To run from source instead (for development):
+
+```bash
+git clone https://github.com/wadekun/krodo
+cd krodo
+uv sync                              # creates .venv with all deps + dev group
+uv run krodo --help                  # `uv run` needed because not pip-installed
 ```
 
 ## Available tools (11 total)
@@ -165,10 +176,10 @@ Select via `KRODO_COMPRESS` environment variable:
 
 ```bash
 # Use algorithmic compression (no extra LLM calls):
-KRODO_COMPRESS=algorithmic uv run krodo "..."
+KRODO_COMPRESS=algorithmic krodo "..."
 
 # Override the token ratio for Claude (default 1.1x, tiktoken undercounts):
-KRODO_TOKEN_RATIO=1.15 uv run krodo --model anthropic/claude-3-5-sonnet "..."
+KRODO_TOKEN_RATIO=1.15 krodo --model anthropic/claude-3-5-sonnet "..."
 ```
 
 ### Error recovery (7 scenarios, §7.5)
@@ -187,10 +198,10 @@ KRODO_TOKEN_RATIO=1.15 uv run krodo --model anthropic/claude-3-5-sonnet "..."
 
 ```bash
 # Limit tool calls per turn (default 25):
-uv run krodo --max-tool-calls 5 "..."
+krodo --max-tool-calls 5 "..."
 
 # Set compression window (how many dialogue rounds to compress at once):
-uv run krodo --summary-window 3 "..."
+krodo --summary-window 3 "..."
 ```
 
 ## Persistence & Memory

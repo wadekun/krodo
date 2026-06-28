@@ -4,38 +4,37 @@
 
 ## 1. Install
 
-Krodo is **pre-alpha (v0.1.0)**. The PyPI upload is deferred while the
-`krodo` distribution name is being finalised; install from source for now.
+Krodo is on PyPI (pre-alpha v0.1.1).
 
 ### Prerequisites
 
 - Python **3.12+** (`python --version`)
-- [`uv`](https://docs.astral.sh/uv/) — fast Python package manager
+- [`uv`](https://docs.astral.sh/uv/) — fast Python package manager (recommended)
 - Git (for checkpoints; Krodo degrades gracefully without it)
 - Optional: [`ripgrep`](https://github.com/BurntSushi/ripgrep) for fast `grep`
 
-### From source (recommended for v0.1.0)
-
-```bash
-git clone https://github.com/wadekun/krodo
-cd krodo
-uv sync
-```
-
-That's it. Verify it runs:
-
-```bash
-uv run krodo --help
-```
-
-### As a library / CLI tool (Phase 2)
-
-Once PyPI is live:
+### As a CLI tool (recommended)
 
 ```bash
 uv tool install krodo
 # or
 pipx install krodo
+```
+
+Verify:
+
+```bash
+krodo --version              # krodo <version>
+krodo --help
+```
+
+### From source (development only)
+
+```bash
+git clone https://github.com/wadekun/krodo
+cd krodo
+uv sync                      # installs runtime + dev deps, creates .venv
+uv run krodo --help          # uv run needed because we didn't pip install
 ```
 
 ## 2. Configure an API key
@@ -55,13 +54,13 @@ the full guide with all 10 supported providers + API key + model strings
 Quick switch for testing (one-shot, no config file change):
 
 ```bash
-uv run krodo --model deepseek/deepseek-v4-flash "task"
+krodo --model deepseek/deepseek-v4-flash "task"
 ```
 
 Verify connectivity:
 
 ```bash
-uv run krodo doctor
+krodo doctor
 ```
 
 ## 3. Pick an approval mode
@@ -77,7 +76,7 @@ Krodo refuses to do anything unsafe unless you let it. Three modes:
 Set via `--approval` or `KRODO_APPROVAL`:
 
 ```bash
-uv run krodo --approval read_only "explain what main.py does"
+krodo --approval read_only "explain what main.py does"
 ```
 
 In `auto_edit` you can answer `a` (approve all future calls from this
@@ -89,13 +88,13 @@ prompts.
 ### Headless — one task, then exit
 
 ```bash
-uv run krodo --root /path/to/project "add a docstring to src/main.py"
+krodo --root /path/to/project "add a docstring to src/main.py"
 ```
 
 ### REPL — interactive multi-turn dialogue
 
 ```bash
-uv run krodo --root /path/to/project
+krodo --root /path/to/project
 you> read package.json and tell me the entry point
 ... (krodo answers) ...
 you> now rename it to app.js and update the package.json
@@ -110,10 +109,10 @@ bug from before" work naturally.
 
 ```bash
 # stdin IS the prompt
-echo "explain this function" | uv run krodo --root /path/to/project
+echo "explain this function" | krodo --root /path/to/project
 
 # stdin is appended as context when a prompt is given
-git diff | uv run krodo "review this change for bugs"
+git diff | krodo "review this change for bugs"
 ```
 
 ## 5. Slash commands (REPL only)
@@ -135,13 +134,13 @@ Sessions are persisted automatically under `<workspace>/.krodo/sessions/`.
 
 ```bash
 # List recent sessions
-uv run krodo resume --list
+krodo resume --list
 
 # Resume by session ID (or unique prefix)
-uv run krodo resume a3f2b1
+krodo resume a3f2b1
 
 # Resume in a specific workspace
-uv run krodo resume --root /path/to/project a3f2b1
+krodo resume --root /path/to/project a3f2b1
 ```
 
 `krodo resume` replays the stored event log into a fresh REPL, so the
@@ -155,9 +154,9 @@ Every write tool call snapshots the affected paths via `git stash create`.
 `krodo undo` restores them:
 
 ```bash
-uv run krodo undo                          # most recent session, this workspace
-uv run krodo undo --session a3f2b1         # specific session
-uv run krodo undo --root /path/to/project  # specific workspace
+krodo undo                          # most recent session, this workspace
+krodo undo --session a3f2b1         # specific session
+krodo undo --root /path/to/project  # specific workspace
 ```
 
 Requires the workspace to be a git repo. Non-git workspaces get a
@@ -176,7 +175,7 @@ Requires the workspace to be a git repo. Non-git workspaces get a
 
 | Symptom | Fix |
 |---------|-----|
-| `command not found: krodo` | Use `uv run krodo ...` from the project root, or `uv tool install .` |
+| `command not found: krodo` | Run `uv tool install krodo` (or `pipx install krodo`). For development from source, use `uv run krodo ...` inside the cloned repo. |
 | `AuthenticationError` from LLM | API key env var missing or wrong — try `krodo doctor` |
 | `checkpoint_skipped` warning | Workspace isn't a git repo; either `git init` or accept that `krodo undo` won't work |
 | Approval prompts too chatty | In `auto_edit`, press `a` to trust this tool for the session, or `p` to add a pattern rule |
