@@ -4,6 +4,7 @@ The banner is a Rich Panel that shows:
   - krodo version
   - workspace root (absolute path)
   - workspace source (how the root was discovered)
+  - resolved model string (LiteLLM format, e.g. zai/glm-4.6)
   - approval mode
 
 This implements the §6 invariant:
@@ -12,7 +13,7 @@ This implements the §6 invariant:
 Usage::
 
     from krodo.cli.banner import print_banner
-    print_banner(workspace, approval_mode="auto_edit")
+    print_banner(workspace, approval_mode="auto_edit", model="zai/glm-4.6")
 """
 
 from __future__ import annotations
@@ -33,7 +34,11 @@ except PackageNotFoundError:
     _VERSION = "dev"
 
 
-def print_banner(workspace: Workspace, approval_mode: str = "auto_edit") -> None:
+def print_banner(
+    workspace: Workspace,
+    approval_mode: str = "auto_edit",
+    model: str | None = None,
+) -> None:
     """Print the session banner to stdout using Rich."""
     content = Text()
     content.append("workspace  ", style="bold cyan")
@@ -45,6 +50,13 @@ def print_banner(workspace: Workspace, approval_mode: str = "auto_edit") -> None
         content.append(str(workspace.git_root), style="green")
     else:
         content.append("none", style="dim")
+    content.append("\n")
+
+    content.append("model      ", style="bold cyan")
+    if model:
+        content.append(model, style="green")
+    else:
+        content.append("(unset)", style="dim")
     content.append("\n")
 
     content.append("approval   ", style="bold cyan")

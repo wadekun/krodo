@@ -439,7 +439,7 @@ def _build_session_components(
     logger = configure_logging(workspace, session_id)
 
     # 3. Print banner (invariant: visible before any tool execution)
-    print_banner(workspace, approval_mode=approval_mode)
+    print_banner(workspace, approval_mode=approval_mode, model=model)
 
     # 4. full_auto warning banner
     if approval_mode == "full_auto":

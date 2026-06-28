@@ -109,6 +109,28 @@ def test_cli_banner_shows_workspace_root(tmp_path: Path) -> None:
     assert "krodo" in result.output.lower()
 
 
+def test_cli_banner_shows_model(tmp_path: Path) -> None:
+    """Banner must show the resolved model string when --model is passed."""
+    runner = CliRunner()
+    responses = [Message(role="assistant", content="done")]
+
+    with _patch_provider(responses):
+        result = runner.invoke(
+            app,
+            [
+                "--root",
+                str(tmp_path),
+                "--model",
+                "deepseek/deepseek-v4-flash",
+                "do something",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "model" in result.output.lower()
+    assert "deepseek/deepseek-v4-flash" in result.output
+
+
 def test_cli_creates_session_files(tmp_path: Path) -> None:
     """After a run: session JSONL in .krodo/sessions/ and app log in .krodo/logs/."""
     runner = CliRunner()
