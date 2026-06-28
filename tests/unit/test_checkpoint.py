@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -120,6 +121,34 @@ class TestNonGitWorkspace:
         ws = _make_workspace(tmp_path, git_root=None)
         mgr = GitCheckpointManager(ws)
         assert mgr.git_root is None
+
+    @pytest.mark.asyncio
+    async def test_non_git_warns_only_once_per_session(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that non-git workspace warns only on first create(), then debug."""
+        ws = _make_workspace(tmp_path, git_root=None)
+        mgr = GitCheckpointManager(ws, logger=logging.getLogger("krodo.sandbox.checkpoint"))
+
+        # First call should log WARNING
+        with caplog.at_level(logging.WARNING):
+            await mgr.create([tmp_path / "file1.py"])
+        assert len(caplog.records) == 1
+        assert "checkpoint_skipped: not a git repository" in caplog.records[0].message
+        assert caplog.records[0].levelname == "WARNING"
+
+        # Second call should log DEBUG (not WARNING)
+        caplog.clear()
+        with caplog.at_level(logging.DEBUG):
+            await mgr.create([tmp_path / "file2.py"])
+        # Should have a DEBUG log, not WARNING
+        debug_records = [r for r in caplog.records if r.levelname == "DEBUG"]
+        warning_records = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert len(warning_records) == 0, "Second call should not log WARNING"
+        assert len(debug_records) == 1, "Second call should log DEBUG"
+        assert "already warned" in debug_records[0].message
 
 
 # ---------------------------------------------------------------------------
