@@ -41,35 +41,24 @@ pipx install krodo
 ## 2. Configure an API key
 
 Krodo uses [LiteLLM](https://github.com/BerriAI/litellm) under the hood,
-so any LiteLLM-supported provider works. Set one environment variable:
+so any LiteLLM-supported provider works. Pick one and set its env var:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...      # Claude
-# or
-export OPENAI_API_KEY=sk-...             # GPT
-# or
-export GEMINI_API_KEY=...                # Gemini
-# or
-export KRODO_API_KEY=...                 # provider-agnostic fallback
+export ANTHROPIC_API_KEY=sk-ant-...      # Claude (default model)
+# or OPENAI_API_KEY / ZAI_API_KEY / DEEPSEEK_API_KEY / GEMINI_API_KEY / ...
 ```
 
-To point at a custom endpoint (Azure OpenAI, LiteLLM Proxy, Ollama,
-vLLM, etc.):
+For other providers (GLM, DeepSeek, Gemini, Ollama, vLLM, custom endpoints),
+the full guide with all 10 supported providers + API key + model strings
++ per-provider troubleshooting is in **[Models & Providers](MODELS.md)**.
+
+Quick switch for testing (one-shot, no config file change):
 
 ```bash
-export KRODO_API_BASE=http://localhost:11434
+uv run krodo --model deepseek/deepseek-v4-flash "task"
 ```
 
-To switch models:
-
-```bash
-export KRODO_MODEL=anthropic/claude-3-5-sonnet-20241022   # default
-export KRODO_MODEL=openai/gpt-4o
-export KRODO_MODEL=gemini/gemini-1.5-pro
-export KRODO_MODEL=ollama/llama3
-```
-
-Verify with `krodo doctor`:
+Verify connectivity:
 
 ```bash
 uv run krodo doctor

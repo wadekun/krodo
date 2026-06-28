@@ -213,24 +213,22 @@ Each file is limited to 8K tokens; total budget is 12K tokens (subdirectory file
 
 ### Configuration files
 
-Set defaults in `.krodo/config.yaml` (workspace) or `~/.config/krodo/config.toml` (user-global):
+Defaults can be set in `.krodo/config.yaml` (workspace) or `~/.config/krodo/config.toml` (user-global). Precedence: CLI flag > env var > workspace > user > built-in default.
+
+Quick example:
 
 ```yaml
-# .krodo/config.yaml — workspace-level defaults
-model: anthropic/claude-3-5-sonnet-20241022
+# .krodo/config.yaml — workspace-level default
+model: deepseek/deepseek-v4-flash
 approval: auto_edit
-max_tool_calls: 20
+max_tool_calls: 15
 ```
 
-```toml
-# ~/.config/krodo/config.toml — user-level defaults (TOML format)
-model = "openai/gpt-4o"
-approval = "full_auto"
-```
+**Full field reference + 10 providers + per-provider API keys + troubleshooting
+(field-name gotchas, proxy caveats, error-pattern diagnosis): see
+[Models & Providers](docs/MODELS.md).**
 
-Precedence (highest → lowest): CLI flag > environment variable > `.krodo/config.yaml` > `~/.config/krodo/config.toml` > built-in default.
-
-Run `krodo doctor` to see which config files are active and what values they contribute.
+Run `krodo doctor` after every config change to verify what's actually loaded.
 
 ## .krodoignore & Git checkpoint
 
@@ -374,6 +372,7 @@ Ground rules:
 | Document | What's in it |
 |----------|-------------|
 | [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | 5-minute install + first task |
+| [`docs/MODELS.md`](docs/MODELS.md) | Model & provider config, switching, troubleshooting |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Dev setup, CI gate, PR flow, commit conventions |
 | [`SECURITY.md`](SECURITY.md) | Threat model, sandbox boundaries, vulnerability reporting |
 | [`CHANGELOG.md`](CHANGELOG.md) | Milestone-by-milestone changes |
