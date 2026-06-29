@@ -9,16 +9,57 @@ once v0.1.0 is tagged.
 ## [Unreleased]
 
 ### Added
-- M7 release scaffold: QUICKSTART, CONTRIBUTING, SECURITY (this changelog).
+- Krodo is now on PyPI: `uv tool install krodo` / `pipx install krodo`.
+  Auto-published via Trusted Publishers (OIDC) on `release.published`.
 
 ### Changed
-- **Brand rename: Coda → Krodo.** Distribution name, Python import package,
-  CLI command, workspace state directory (`.coda/` → `.krodo/`), config
-  directory (`~/.config/coda/` → `~/.config/krodo/`), and environment
-  variables (`CODA_*` → `KRODO_*`) all renamed. Reason: PyPI `coda` occupied
-  by an unrelated 2017 file-tagging package; GitHub `agno-agi/coda` is an
-  active same-category coding-agent project. Krodo is verified clean across
-  PyPI / npm / `.ai` / `.dev` / `.com`.
+- (No unreleased changes.)
+
+## [0.1.1] — 2026-06-28
+
+### Added
+- `krodo --version` / `-V` flag — prints version + exits 0. Eager callback
+  on the main Typer app, so it fires before any other option or subcommand
+  dispatch. `__version__` centralised in `src/krodo/__init__.py` via
+  `importlib.metadata` (with `"dev"` fallback for source-only runs).
+- Banner now shows the resolved model string in its own row (between
+  `git` and `approval`), so users can verify config at a glance.
+- "Thinking…" spinner in REPL and headless modes between user prompt and
+  the first streamed LLM token. `AgentLoop.run()` gains a per-turn
+  `on_first_token` callback; both streaming and non-streaming LLM paths
+  fire it once before the first rendered delta. The CLI uses Rich's
+  `console.status()` to drive the spinner and stops it on first token via
+  the callback (with a `finally` safety net for error paths).
+- PyPI Trusted Publishers workflow (`.github/workflows/publish.yml`).
+  Triggers on `release.published`; also has `workflow_dispatch` fallback
+  because GitHub suppresses `published` events when a release is deleted
+  + re-created with the same tag.
+
+### Fixed
+- Approval prompt now shows the right per-tool context. The hardcoded
+  `"path"` / `"cmd"` lookup was missing `run_shell` (uses `command`),
+  `git_commit` (uses `message`), and `apply_patch` (uses `patch`).
+  Replaced with a priority-keyed `_HINT_KEYS` tuple (`path > command >
+  message`) and a `_tool_call_hint()` helper. `patch` is intentionally
+  omitted because `_maybe_render_diff` already renders the full diff
+  below the prompt.
+- `.krodo/config.yaml` field names documented in MODELS.md now match
+  the actual `KrodoConfig` Pydantic model (`model` not `provider`;
+  `approval` not `approval_mode`; `max_tool_calls` not
+  `max_tool_calls_per_turn`). Pydantic silently ignores unknown fields.
+- `krodo doctor` now respects workspace config model (was hardcoded
+  to `_DEFAULT_MODEL`). Mirrors the same "config overrides default"
+  logic in `main.py` and `resume.py`.
+- LiteLLM issue #14011 (`PydanticSerializationUnexpectedValue:
+  ServerToolUse`) warning silenced via a targeted `warnings.filterwarnings`
+  call. Filter scope is narrow (regex on the message + `UserWarning`
+  category only) so unrelated warnings still surface.
+- M7 rename cleanup: `.gitignore` patterns (`.coda/*` → `.krodo/*`),
+  `LICENSE` (`The Coda Contributors` → `The Krodo Contributors`), and
+  the physical `.coda/` directory on disk were missed by the initial
+  perl pass.
+- CI failure on first GitHub push: 10 pre-existing files needed
+  `ruff format`; correct repo owner `liangck` → `wadekun` across docs.
 
 ### Fixed
 - mypy `--strict` now passes with zero errors (was 10 errors before M7).
@@ -112,5 +153,6 @@ sections below summarise each milestone; full design notes live in
 - Documentation quartet (QUICKSTART / CONTRIBUTING / SECURITY / this file).
 - GitHub repo + v0.1.0 tag + Release (deferred until owner confirms).
 
-[Unreleased]: https://github.com/wadekun/krodo/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/wadekun/krodo/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/wadekun/krodo/releases/tag/v0.1.1
 [0.1.0]: https://github.com/wadekun/krodo/releases/tag/v0.1.0

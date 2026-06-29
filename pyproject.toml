@@ -7,7 +7,7 @@ packages = ["src/krodo"]
 
 [project]
 name = "krodo"
-version = "0.1.0"
+version = "0.1.1"
 description = "Krodo — a local-first, multi-provider coding agent CLI"
 readme = "README.md"
 requires-python = ">=3.12"
