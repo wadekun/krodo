@@ -149,17 +149,90 @@ Checklist:
 
 ## 7. Releasing
 
-Release process is being defined in M7. The short version:
+Cutting a release involves 4 files. **All four must be in the same commit**, otherwise the lockfile goes stale and CI's `uv sync --frozen` will eventually catch it.
 
-1. Bump `version` in `pyproject.toml`.
-2. Move `[Unreleased]` → `[x.y.z] — YYYY-MM-DD` in `CHANGELOG.md`.
-3. Commit as `chore(release): vx.y.z`.
-4. `git tag vx.y.z && git push --tags`.
-5. `gh release create vx.y.z` with the CHANGELOG section as body.
+### Release checklist (cutting vX.Y.Z)
 
-PyPI publication (trusted-publishers via GitHub Actions) is **deferred
-past v0.1.0**; first releases are GitHub Release + `uv tool install
-git+https://github.com/wadekun/krodo`.
+1. **Bump version** in `pyproject.toml`:
+   ```bash
+   # 例: 0.1.1 → 0.1.2
+   sed -i '' 's/^version = "0.1.1"/version = "0.1.2"/' pyproject.toml
+   ```
+
+2. **Sync uv.lock to the new version** — uv doesn't auto-update the krodo self-reference in lockfile on every `uv sync`; do it explicitly:
+   ```bash
+   uv lock                      # re-resolves lockfile, picks up new self-version
+   ```
+   Verify with:
+   ```bash
+   grep -A1 '^name = "krodo"' uv.lock   # should show version = "0.1.2"
+   ```
+
+3. **Update CHANGELOG**: move `[Unreleased]` block to `[x.y.z] — YYYY-MM-DD`, and add a fresh empty `[Unreleased]` block at the top. Update the link references at the bottom of the file.
+
+4. **Single commit with all three files**:
+   ```bash
+   git add pyproject.toml uv.lock CHANGELOG.md
+   git commit -m "chore(release): vX.Y.Z"
+   ```
+   Never commit only `pyproject.toml` + `CHANGELOG.md` and leave `uv.lock` for later — that creates a stale-lockfile state that bites the next contributor / CI run.
+
+5. **Tag and push**:
+   ```bash
+   git tag vX.Y.Z
+   git push origin main
+   git push --tags
+   ```
+
+6. **Create GitHub Release** — this auto-triggers the PyPI publish workflow:
+   ```bash
+   gh release create vX.Y.Z --notes-from-tag
+   # 或手写 release notes(取 CHANGELOG 的 [x.y.z] 节内容)
+   ```
+
+7. **Verify publish**:
+   ```bash
+   gh run watch $(gh run list --workflow=publish.yml --limit 1 --json databaseId -q '.[0].databaseId')
+   curl -s https://pypi.org/pypi/krodo/json | python3 -c "import sys, json; print(json.load(sys.stdin)['info']['version'])"
+   ```
+
+### What the publish workflow does
+
+`.github/workflows/publish.yml` triggers on `release.published`. It:
+
+1. Checks out the tagged commit (via `actions/checkout` with `ref: ${{ inputs.ref || github.event.release.tag_name }}`).
+2. Runs the full CI gate (ruff / format / mypy / pytest) — never ships a broken build.
+3. Builds wheel + sdist via `uv build`.
+4. Publishes to PyPI via Trusted Publishers (OIDC) — no API tokens.
+
+If `release.published` doesn't fire (e.g. you deleted + re-created a release with the same tag, GitHub suppresses the event), the workflow also has `workflow_dispatch` as a manual fallback:
+
+```bash
+gh workflow run publish.yml -f ref=vX.Y.Z
+```
+
+### What if I forgot `uv.lock` in the release commit?
+
+If you pushed the release tag and notice later that uv.lock is stale in main:
+
+1. **PyPI wheel is fine** — the build was driven by pyproject.toml; uv.lock staleness doesn't affect the wheel contents.
+2. **CI on main may eventually fail** if someone runs `uv sync --frozen` against the stale state (depends on uv's tolerance for self-reference mismatches).
+3. **Fix forward**: commit the lockfile sync as a follow-up:
+   ```bash
+   uv lock                              # if not already done
+   git add uv.lock
+   git commit -m "fix(release): sync uv.lock to vX.Y.Z self-version
+
+   The chore(release): vX.Y.Z commit bumped pyproject.toml but forgot
+   uv.lock. Subsequent uv sync/build calls silently updated the self-
+   reference. This commit lands that reconciliation."
+   git push origin main
+   ```
+   Do NOT amend the tagged commit — tags are immutable once pushed.
+
+### PyPI publication status
+
+PyPI is **live** since v0.1.0. `krodo` distribution name is locked; all future releases auto-publish via Trusted Publishers.
 
 ## 8. Conduct & licensing
 
