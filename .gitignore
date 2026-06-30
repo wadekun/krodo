@@ -41,3 +41,6 @@ coverage.xml
 
 # Cursor state
 .cursor/
+
+# Drafts (community posts, blog drafts — not for git management)
+docs/_drafts/
