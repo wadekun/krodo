@@ -88,7 +88,13 @@ class ReadFileTool:
         # Check KrodoIgnore before reading (§5.3)
         match = ctx.ignore.match(target)
         if match.is_ignored:
-            return str(match.error())
+            return (
+                f"ERROR: path '{params.path}' is ignored by krodo "
+                f"(rule: '{match.pattern}' from {match.source}). "
+                "This is a krodo policy decision, not a missing file. "
+                "To allow access, list the path in <workspace>/.krodoignore "
+                "as an override, or use run_shell with approval."
+            )
 
         if not target.exists():
             return f"ERROR: file '{params.path}' does not exist"

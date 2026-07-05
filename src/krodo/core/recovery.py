@@ -94,8 +94,16 @@ _WRITE_TOOLS = frozenset(
 class StallDetector:
     """Detects when the agent issues identical write-tool calls repeatedly.
 
-    Read-only tools are excluded: ``read_file``, ``list_dir``, ``glob``,
-    ``grep``, ``git_status``, ``git_diff``.
+    Stall is strictly defined as "``_STALL_THRESHOLD`` consecutive *adjacent*
+    identical write-tool calls". Any intervening tool call — read-only OR a
+    different write — breaks the consecutive chain and resets the counter.
+
+    Historical note: an earlier version skipped ``record()`` entirely for
+    read-only tools, which left ``_consecutive`` unchanged across long
+    exploratory sequences. That caused false positives: two identical
+    ``run_shell cat foo`` calls separated by 30+ read_file calls were
+    incorrectly counted as "3 consecutive" because the reads did not reset
+    the counter (see session 5040d7bc.jsonl for the bug repro).
     """
 
     _last_sig: str | None = field(default=None, init=False)
@@ -103,20 +111,29 @@ class StallDetector:
     _recent: list[str] = field(default_factory=list, init=False)
 
     def record(self, tool_name: str, arguments: dict[str, object]) -> None:
-        """Record a tool call.  Raises StallError if stall threshold is exceeded."""
-        if tool_name not in _WRITE_TOOLS:
-            return  # read-only tools do not count toward stall
+        """Record a tool call.  Raises StallError if stall threshold is exceeded.
 
+        Read-only tools do not count toward the stall counter, but they DO
+        break the consecutive chain — any read between two identical writes
+        means the writes are no longer "consecutive adjacent".
+        """
         sig = _signature(tool_name, arguments)
         self._recent.append(f"{tool_name}({json.dumps(arguments, sort_keys=True)[:80]})")
         if len(self._recent) > _STALL_THRESHOLD:
             self._recent.pop(0)
 
-        if sig == self._last_sig:
+        is_write = tool_name in _WRITE_TOOLS
+
+        if is_write and sig == self._last_sig:
+            # Same write tool called with identical args as the previous
+            # *adjacent* write — extend the consecutive chain.
             self._consecutive += 1
         else:
-            self._consecutive = 1
-            self._last_sig = sig
+            # Any other call (read-only, or a different write) breaks the
+            # chain. If this call is itself a write, it starts a new chain
+            # of length 1; reads leave the counter at 0.
+            self._consecutive = 1 if is_write else 0
+            self._last_sig = sig if is_write else None
 
         if self._consecutive >= _STALL_THRESHOLD:
             raise StallError(tool_name, self._consecutive)

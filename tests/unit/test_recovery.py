@@ -74,6 +74,45 @@ class TestStallDetector:
         sig2 = _signature("edit_file", {"b": 2, "a": 1})
         assert sig1 == sig2  # sort_keys=True ensures determinism
 
+    def test_read_only_intervention_resets_consecutive(self) -> None:
+        """Read-only tool between two identical writes breaks the chain.
+
+        Regression for session 5040d7bc: model called ``run_shell cat foo``
+        twice with 30+ read_file / list_dir calls in between, then a third
+        cat. Pre-fix this raised StallError because reads did not reset
+        ``_consecutive``. Post-fix the chain is broken by the reads.
+        """
+        det = StallDetector()
+        args = {"command": "cat foo.txt"}
+        det.record("run_shell", args)  # consecutive=1
+        det.record("run_shell", args)  # consecutive=2
+        # Intervening read-only calls must reset the chain
+        for _ in range(5):
+            det.record("read_file", {"path": "x.py"})
+        # Now a third identical run_shell should NOT raise — chain was broken
+        det.record("run_shell", args)  # consecutive=1 (fresh chain)
+        det.record("run_shell", args)  # consecutive=2
+
+    def test_different_write_resets_consecutive(self) -> None:
+        """A different write call also breaks the chain (different signature)."""
+        det = StallDetector()
+        det.record("write_file", {"path": "a.py", "content": "x"})
+        det.record("write_file", {"path": "a.py", "content": "x"})
+        # Different args → fresh chain
+        det.record("write_file", {"path": "a.py", "content": "y"})
+        det.record("write_file", {"path": "a.py", "content": "x"})
+        det.record("write_file", {"path": "a.py", "content": "x"})
+        # No stall — only 2 consecutive identical at the tail
+
+    def test_truly_consecutive_writes_still_stall(self) -> None:
+        """Sanity: 3 truly adjacent identical writes still raise StallError."""
+        det = StallDetector()
+        args = {"path": "a.py", "content": "x"}
+        det.record("write_file", args)
+        det.record("write_file", args)
+        with pytest.raises(StallError):
+            det.record("write_file", args)
+
 
 # ---------------------------------------------------------------------------
 # Scenario 1: BAD_JSON
