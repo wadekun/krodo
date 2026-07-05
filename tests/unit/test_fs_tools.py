@@ -99,15 +99,40 @@ async def test_read_file_not_a_file(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_file_ignored_by_krodoignore(tmp_path: Path) -> None:
-    """read_file on a .env file returns PathIgnoredError (hardcoded default)."""
+async def test_read_file_ignored_returns_clear_error(tmp_path: Path) -> None:
+    """read_file on an ignored path returns a clear, actionable error.
+
+    The error must:
+    - Be flagged as ERROR (so is_error detection in fs.py catches it)
+    - Name the path, the matching rule, and the source tier
+    - Tell the model this is a krodo policy, not a missing file
+    - Suggest the override path (.krodoignore) so the model isn't stuck
+    """
     (tmp_path / ".env").write_text("SECRET=abc\n")
     ctx = _ctx(tmp_path)
     result = await ReadFileTool().execute({"path": ".env"}, ctx)
     assert result.is_error
-    assert "PathIgnoredError" in result.content
-    assert ".env" in result.content
-    assert "hardcoded" in result.content
+    assert "ERROR" in result.content
+    assert ".env" in result.content  # path
+    assert "hardcoded" in result.content  # source tier
+    assert "krodo" in result.content.lower()  # policy attribution
+    assert "krodoignore" in result.content.lower()  # suggested override
+
+
+@pytest.mark.asyncio
+async def test_read_file_under_gitignore_succeeds(tmp_path: Path) -> None:
+    """Regression: .gitignore must NOT block read_file (only .krodoignore + hardcoded do).
+
+    Reproduces session 5040d7bc scenario: a path under .gitignore (e.g. .cursor/)
+    must be readable by the agent without needing to fall back to run_shell.
+    """
+    (tmp_path / ".gitignore").write_text(".cursor/\n")
+    (tmp_path / ".cursor").mkdir()
+    (tmp_path / ".cursor" / "config.json").write_text('{"key": "value"}\n')
+    ctx = _ctx(tmp_path)
+    result = await ReadFileTool().execute({"path": ".cursor/config.json"}, ctx)
+    assert not result.is_error
+    assert "value" in result.content
 
 
 # ---------------------------------------------------------------------------

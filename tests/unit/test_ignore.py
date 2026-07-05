@@ -1,4 +1,11 @@
-"""Tests for KrodoIgnore — 4-tier path filtering (M4 PR1)."""
+"""Tests for KrodoIgnore — 3-tier path filtering (M4 PR1).
+
+Historical note: krodo used to consult ``.gitignore`` as a 2nd tier between
+hardcoded defaults and ``.krodoignore``. As of fix-stall-and-gitignore-policy
+(see .cursor/plans/fix-stall-and-gitignore-policy_7c9e3a14.plan.md) the
+``.gitignore`` tier is removed entirely — its semantic is "git does not
+track", not "agent cannot access". Tests below cover the new 3-tier model.
+"""
 
 from __future__ import annotations
 
@@ -91,36 +98,39 @@ class TestHardcodedDefaults:
 
 
 # ---------------------------------------------------------------------------
-# Tier 2 — .gitignore
+# .gitignore is intentionally NOT consulted (regression guard)
 # ---------------------------------------------------------------------------
 
 
-class TestGitignore:
-    def test_gitignore_pattern_respected(self, tmp_path: Path) -> None:
-        ig = make_ignore(tmp_path, gitignore="*.log\n")
-        assert ig.is_ignored(tmp_path / "app.log")
+class TestGitignoreNotConsulted:
+    """``.gitignore`` must not affect agent access — see module docstring."""
 
-    def test_gitignore_dir_pattern(self, tmp_path: Path) -> None:
-        ig = make_ignore(tmp_path, gitignore="dist/\n")
-        assert ig.is_ignored(tmp_path / "dist" / "bundle.js")
-
-    def test_file_not_in_gitignore_not_ignored(self, tmp_path: Path) -> None:
+    def test_gitignore_pattern_ignored_by_krodo(self, tmp_path: Path) -> None:
+        # Path matches a .gitignore pattern but is NOT in hardcoded defaults
+        # or .krodoignore → krodo must allow it.
         ig = make_ignore(tmp_path, gitignore="*.log\n")
-        assert not ig.is_ignored(tmp_path / "app.py")
+        assert not ig.is_ignored(tmp_path / "app.log")
+
+    def test_gitignore_dir_pattern_ignored_by_krodo(self, tmp_path: Path) -> None:
+        ig = make_ignore(tmp_path, gitignore="generated/\n")
+        assert not ig.is_ignored(tmp_path / "generated" / "out.txt")
 
     def test_missing_gitignore_ok(self, tmp_path: Path) -> None:
-        ig = KrodoIgnore(tmp_path)  # no .gitignore
+        ig = KrodoIgnore(tmp_path)  # no .gitignore at all
         assert not ig.is_ignored(tmp_path / "src" / "app.py")
 
-    def test_gitignore_source_reported(self, tmp_path: Path) -> None:
-        ig = make_ignore(tmp_path, gitignore="*.log\n")
+    def test_gitignore_does_not_mask_krodoignore(self, tmp_path: Path) -> None:
+        # If a path is in BOTH .gitignore and .krodoignore, krodoignore wins
+        # (it's the dedicated agent access-policy file).
+        ig = make_ignore(tmp_path, gitignore="*.log\n", krodoignore="*.log\n")
         result = ig.match(tmp_path / "app.log")
         assert result.is_ignored
-        assert result.source == ".gitignore"
+        # Source must be .krodoignore, not .gitignore (which is no longer loaded)
+        assert result.source == ".krodoignore"
 
 
 # ---------------------------------------------------------------------------
-# Tier 3 — project .krodoignore
+# Tier 2 — project .krodoignore
 # ---------------------------------------------------------------------------
 
 
@@ -130,10 +140,9 @@ class TestKrodoignore:
         assert ig.is_ignored(tmp_path / "secrets" / "token.txt")
 
     def test_krodoignore_overrides_below_tiers(self, tmp_path: Path) -> None:
-        # Not in .gitignore, but in .krodoignore
-        ig = make_ignore(tmp_path, gitignore="*.log\n", krodoignore="config.yaml\n")
+        # Path in .krodoignore is ignored even if not in any other tier.
+        ig = make_ignore(tmp_path, krodoignore="config.yaml\n")
         assert ig.is_ignored(tmp_path / "config.yaml")
-        assert ig.is_ignored(tmp_path / "app.log")  # gitignore still active
 
     def test_krodoignore_source_reported(self, tmp_path: Path) -> None:
         ig = make_ignore(tmp_path, krodoignore="internal/\n")
@@ -147,7 +156,7 @@ class TestKrodoignore:
 
 
 # ---------------------------------------------------------------------------
-# User-level override (Tier 4)
+# User-level override (Tier 3)
 # ---------------------------------------------------------------------------
 
 

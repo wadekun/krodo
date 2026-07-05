@@ -1,13 +1,21 @@
-"""KrodoIgnore — 4-tier path filtering for all fs tools (architecture.md §5.3).
+"""KrodoIgnore — 3-tier path filtering for all fs tools (architecture.md §5.3).
 
-Merges ignore rules from four sources, in increasing specificity order:
+Merges ignore rules from three sources, in increasing specificity order:
     1. Hard-coded defaults (always active, cannot be disabled)
        — credential files (.env, *.pem, id_rsa*, …)
        — large/binary files (*.bin, *.so, *.zip, …)
        — noise directories (node_modules/, .venv/, __pycache__/, …)
-    2. Project .gitignore (auto-respected)
-    3. Project .krodoignore  (<workspace_root>/.krodoignore)
-    4. User-level krodoignore (~/.config/krodo/krodoignore)
+    2. Project .krodoignore  (<workspace_root>/.krodoignore)
+    3. User-level krodoignore (~/.config/krodo/krodoignore)
+
+Note: ``.gitignore`` is intentionally NOT consulted here. Its semantic is
+"git does not track this path", not "agent cannot read/write this path".
+Common noise directories that historically leaked via ``.gitignore``
+(``node_modules/``, ``.venv/``, ``__pycache__/``, ``dist/``, ``build/``,
+``.git/``, …) are in the hardcoded tier above, so removing the ``.gitignore``
+tier does not lower the safety floor. Users who want to opt out of any
+other path explicitly should list it in ``.krodoignore`` — that is the
+dedicated agent access-policy file.
 
 Matching uses the `pathspec` library (gitignore-spec, same semantics as
 GitHub / VS Code).  All paths passed to `match()` must be relative to the
@@ -87,7 +95,6 @@ _HARDCODED_PATTERNS: list[str] = [
 
 # Source name constants for error messages
 _SOURCE_HARDCODED = "hardcoded"
-_SOURCE_GITIGNORE = ".gitignore"
 _SOURCE_KRODOIGNORE = ".krodoignore"
 _SOURCE_USER = "user-krodoignore"
 
@@ -132,7 +139,7 @@ class MatchResult:
 
 
 class KrodoIgnore:
-    """4-tier ignore rule engine backed by pathspec (gitignore semantics).
+    """3-tier ignore rule engine backed by pathspec (gitignore semantics).
 
     All tiers are stored as separate PathSpec objects so that the match source
     can be reported accurately in error messages.
@@ -152,13 +159,10 @@ class KrodoIgnore:
             patterns.extend(extra_patterns)
         self._hardcoded = pathspec.PathSpec.from_lines("gitwildmatch", patterns)
 
-        # Tier 2: .gitignore
-        self._gitignore = self._load_spec(workspace_root / ".gitignore")
-
-        # Tier 3: .krodoignore
+        # Tier 2: .krodoignore
         self._krodoignore = self._load_spec(workspace_root / ".krodoignore")
 
-        # Tier 4: user-level
+        # Tier 3: user-level
         user_path = Path.home() / ".config" / "krodo" / "krodoignore"
         self._user = self._load_spec(user_path)
 
@@ -193,10 +197,11 @@ class KrodoIgnore:
 
         rel_str = rel.as_posix()
 
-        # Check tiers in priority order: hardcoded → gitignore → krodoignore → user
+        # Check tiers in priority order: hardcoded → krodoignore → user.
+        # Note: .gitignore is intentionally NOT consulted — its semantic is
+        # "git does not track", not "agent cannot access". See module docstring.
         for spec, source in (
             (self._hardcoded, _SOURCE_HARDCODED),
-            (self._gitignore, _SOURCE_GITIGNORE),
             (self._krodoignore, _SOURCE_KRODOIGNORE),
             (self._user, _SOURCE_USER),
         ):
