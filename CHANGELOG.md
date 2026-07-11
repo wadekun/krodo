@@ -11,6 +11,18 @@ once v0.1.0 is tagged.
 ### Added
 - Krodo is now on PyPI: `uv tool install krodo` / `pipx install krodo`.
   Auto-published via Trusted Publishers (OIDC) on `release.published`.
+- **Provider matrix CI job** (Phase 2 M8). `.github/workflows/ci.yml` now
+  runs a one-turn smoke request against Anthropic / OpenAI / Gemini / DeepSeek / Z.AI (GLM) on
+  every non-draft PR. `continue-on-error: true` so a flaky API or quota
+  issue never blocks merge; steps auto-skip when the repo secret is unset,
+  so the job is green even before keys are configured. Smoke script:
+  `.github/workflows/scripts/provider_e2e.py`.
+- **Anthropic prompt caching** (Phase 2 M8). `LiteLLMProvider` tags the
+  system message with `cache_control: {"type": "ephemeral"}` for
+  `anthropic/*` models, so the static prompt prefix is cached across turns
+  (lower latency + cost on long sessions). Defaults on; opt out via
+  `prompt_cache: false` in `.krodo/config.yaml`. No-op for OpenAI/Gemini
+  (they cache provider-side automatically).
 
 ### Changed
 - (No unreleased changes.)

@@ -66,6 +66,16 @@ def resume_command(
 
     store = JsonlSessionStore(workspace_root / ".krodo" / "sessions")
 
+    # M8: resolve prompt_cache from workspace config so `krodo resume` honours
+    # `prompt_cache: false` the same way the main entry does. Other config
+    # fields (model / api_key / max_tokens / ...) are still sourced from
+    # Typer defaults on the resume subcommand — extending full config.yaml
+    # support here is a separate cleanup, tracked outside M8.
+    from krodo.core.config import load_config  # noqa: PLC0415
+
+    cfg, _cfg_sources = load_config(workspace_root)
+    prompt_cache_value = cfg.prompt_cache if cfg.prompt_cache is not None else True
+
     # --list: print recent sessions and exit
     if list_recent:
         rows = store.list_recent(limit=10)
@@ -104,6 +114,7 @@ def resume_command(
                 max_tool_calls=max_tool_calls,
                 max_tokens=max_tokens,
                 resume_session_id=target_id,
+                prompt_cache=prompt_cache_value,
             )
 
         components = build_resumed_components(resolved_id, _rebuild)

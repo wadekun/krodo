@@ -135,11 +135,17 @@ class LiteLLMProvider:
         api_base: str | None = None,
         api_key: str | None = None,
         extra_kwargs: dict[str, Any] | None = None,
+        prompt_cache: bool = True,
     ) -> None:
         self.model = model
         self._api_base = api_base
         self._api_key = api_key
         self._extra: dict[str, Any] = extra_kwargs or {}
+        # Anthropic prompt caching: when True (default), the system message
+        # is tagged with cache_control so the static prompt prefix is cached
+        # across turns (5-min TTL). Only applied to anthropic/* models —
+        # OpenAI/Gemini handle caching provider-side automatically.
+        self._prompt_cache = prompt_cache
 
     # ------------------------------------------------------------------
     # LLMProvider Protocol implementation
@@ -270,9 +276,23 @@ class LiteLLMProvider:
         messages: list[Message],
         tools: list[ToolDef] | None,
     ) -> dict[str, Any]:
+        litellm_messages = [_message_to_litellm(m) for m in messages]
+
+        # Anthropic prompt caching: tag the system message so the static
+        # prompt prefix (system rules + tool list) is cached across turns.
+        # 5-min TTL, big win on long conversations. No-op for non-Anthropic
+        # models — OpenAI/Gemini cache automatically on their side.
+        if (
+            self._prompt_cache
+            and self.model.startswith("anthropic/")
+            and litellm_messages
+            and litellm_messages[0].get("role") == "system"
+        ):
+            litellm_messages[0]["cache_control"] = {"type": "ephemeral"}
+
         kwargs: dict[str, Any] = {
             "model": self.model,
-            "messages": [_message_to_litellm(m) for m in messages],
+            "messages": litellm_messages,
         }
         if tools:
             kwargs["tools"] = [_tooldef_to_litellm(td) for td in tools]

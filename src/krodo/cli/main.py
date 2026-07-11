@@ -341,6 +341,10 @@ def main(
         and ctx.get_parameter_source("summary_window") == ParameterSource.DEFAULT
     ):
         summary_window = cfg.summary_window
+    # prompt_cache has no CLI flag (rarely needs overriding); config.yaml
+    # can opt out by setting `prompt_cache: false`. Defaults to True so
+    # Anthropic system-prompt caching is on out of the box.
+    prompt_cache_value = cfg.prompt_cache if cfg.prompt_cache is not None else True
 
     import asyncio  # noqa: PLC0415
 
@@ -365,6 +369,7 @@ def main(
             max_tool_calls=max_tool_calls,
             max_tokens=max_tokens,
             summary_window=summary_window,
+            prompt_cache=prompt_cache_value,
         )
         if effective_prompt:
             await _run_headless(effective_prompt, components)
@@ -382,6 +387,7 @@ def main(
                     max_tool_calls=max_tool_calls,
                     max_tokens=max_tokens,
                     summary_window=summary_window,
+                    prompt_cache=prompt_cache_value,
                     resume_session_id=target_id,
                 )
 
@@ -442,6 +448,7 @@ def _build_session_components(
     max_tokens: int = 16384,
     summary_window: int = 2,  # noqa: ARG001  (reserved for M5 compactor wiring)
     resume_session_id: str | None = None,
+    prompt_cache: bool = True,
 ) -> SessionComponents:
     """Wire workspace, logger, banner, provider, tools, and AgentLoop.
 
@@ -518,6 +525,9 @@ def _build_session_components(
         api_key=api_key,
         api_base=api_base,
         extra_kwargs={"max_tokens": max_tokens},
+        # prompt_cache defaults to True; config.yaml can opt out (e.g. very
+        # short sessions where cache-write cost outweighs the benefit).
+        prompt_cache=prompt_cache,
     )
 
     # M3: Budget calculator + compressor

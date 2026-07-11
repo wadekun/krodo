@@ -92,6 +92,7 @@ from lower-priority sources if not overridden.
 | `max_tool_calls` | `int` | `25` | Tool-call limit per turn |
 | `summary_window` | `int` | `2` | Dialogue rounds compressed per pass |
 | `compress` | `"llm"` / `"algorithmic"` | `llm` | Context compression strategy |
+| `prompt_cache` | `bool` | `true` | Anthropic prompt caching for the system message (see [Prompt caching](#prompt-caching)) |
 
 ### ⚠️ Field-name gotcha
 
@@ -227,6 +228,28 @@ Then retry.
 The resume subcommand has its own `_DEFAULT_MODEL` constant. If config-based
 override isn't applied (older bug, similar to doctor), update to a version with
 the fix.
+
+## Prompt caching
+
+For Anthropic models (`anthropic/*`), krodo tags the system message with
+`cache_control: {"type": "ephemeral"}` so the static prompt prefix (system
+rules + tool list) is cached for ~5 minutes. On multi-turn conversations
+this skips re-processing the system prompt every turn, lowering latency
+and (for metered APIs) cost. Enabled by default.
+
+OpenAI and Gemini handle prompt caching provider-side and need no
+client-side flag, so `prompt_cache` only affects Anthropic models.
+
+### Turning it off
+
+Rarely needed, but if a session is so short that the cache-write cost
+outweighs the benefit (cache writes cost ~25% more than a normal read on
+Anthropic), disable it:
+
+```yaml
+# .krodo/config.yaml
+prompt_cache: false
+```
 
 ## Advanced
 
