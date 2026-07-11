@@ -12,6 +12,8 @@ Providers:
     anthropic  — needs ANTHROPIC_API_KEY
     openai     — needs OPENAI_API_KEY
     gemini     — needs GEMINI_API_KEY
+    deepseek   — needs DEEPSEEK_API_KEY
+    zai        — needs ZAI_API_KEY (Z.AI / GLM)
 
 Ollama is intentionally absent here: running it in CI needs a docker
 container + model pull, which is heavier than this smoke-test scope.
@@ -37,12 +39,16 @@ _DEFAULT_MODELS: dict[str, str] = {
     "anthropic": "anthropic/claude-3-5-haiku-latest",
     "openai": "openai/gpt-4o-mini",
     "gemini": "gemini/gemini-2.0-flash-lite",
+    "deepseek": "deepseek/deepseek-v4-flash",
+    "zai": "zai/glm-4.6",
 }
 
 _KEY_ENV: dict[str, str] = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
     "gemini": "GEMINI_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "zai": "ZAI_API_KEY",
 }
 
 _PROMPT = [{"role": "user", "content": "Reply with exactly one word: OK"}]

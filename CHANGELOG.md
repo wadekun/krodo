@@ -12,7 +12,7 @@ once v0.1.0 is tagged.
 - Krodo is now on PyPI: `uv tool install krodo` / `pipx install krodo`.
   Auto-published via Trusted Publishers (OIDC) on `release.published`.
 - **Provider matrix CI job** (Phase 2 M8). `.github/workflows/ci.yml` now
-  runs a one-turn smoke request against Anthropic / OpenAI / Gemini on
+  runs a one-turn smoke request against Anthropic / OpenAI / Gemini / DeepSeek / Z.AI (GLM) on
   every non-draft PR. `continue-on-error: true` so a flaky API or quota
   issue never blocks merge; steps auto-skip when the repo secret is unset,
   so the job is green even before keys are configured. Smoke script:
