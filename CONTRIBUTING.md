@@ -38,6 +38,24 @@ uv run ruff format .
 Coverage target: **≥ 90%** for `krodo.core` / `krodo.llm`; **100%** for
 `krodo.tools` / `krodo.sandbox` (per `pyproject.toml` §`coverage.report`).
 
+### Provider matrix job (non-blocking)
+
+CI also runs a `provider_matrix` job that sends a one-turn smoke request to
+each real LLM provider (Anthropic / OpenAI / Gemini). It is
+**`continue-on-error: true`** — a flaky API, quota issue, or missing key
+never blocks merge. It exists to catch provider-integration regressions
+(auth, model-id typos, response-shape changes), not to gate PRs.
+
+Each provider step auto-skips (exit 0) when the corresponding repo secret
+is unset, so the job stays green even before any keys are configured. To
+enable real runs, add `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` /
+`GEMINI_API_KEY` in **repo Settings → Secrets and variables → Actions**
+— no code change needed.
+
+The smoke script is
+[`.github/workflows/scripts/provider_e2e.py`](.github/workflows/scripts/provider_e2e.py);
+run it locally with `uv run python .github/workflows/scripts/provider_e2e.py anthropic`.
+
 ### Type-checking rules
 
 - `mypy --strict` is non-negotiable. No `# type: ignore` without an

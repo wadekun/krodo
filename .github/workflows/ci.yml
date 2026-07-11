@@ -60,5 +60,46 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-  # Phase 2.6 will add a provider matrix job (Claude / GPT / Gemini / Ollama)
-  # that runs against recorded VCR cassettes. Stub left intentionally for now.
+  # Provider matrix — real LLM e2e regression (Phase 2 M8).
+  #
+  # Non-blocking: continue-on-error means a flaky API / quota / network
+  # issue never blocks merge. Steps auto-skip (exit 0) when the
+  # corresponding secret is unset, so this job is safe to land before any
+  # provider keys are configured. Once secrets are added in repo settings,
+  # the job starts running for real with zero code changes.
+  #
+  # Ollama is intentionally deferred — needs docker + model pull, heavier
+  # than this smoke-test scope. Will land in a follow-up.
+  provider_matrix:
+    name: Provider e2e (${{ matrix.provider }})
+    needs: lint-type-test
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [anthropic, openai, gemini]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-groups --frozen
+
+      - name: Run ${{ matrix.provider }} e2e
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: uv run python .github/workflows/scripts/provider_e2e.py ${{ matrix.provider }}

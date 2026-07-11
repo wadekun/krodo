@@ -50,6 +50,11 @@ class KrodoConfig(BaseModel):
     max_tool_calls: int | None = None
     summary_window: int | None = None
     compress: Literal["llm", "algorithmic"] | None = None
+    # Anthropic prompt caching (tags the system message with cache_control
+    # so the static prompt prefix is cached across turns). Defaults to True
+    # when unset here; set to False in config.yaml to disable for cases
+    # where cache-write cost outweighs the benefit (very short sessions).
+    prompt_cache: bool | None = None
 
 
 # ---------------------------------------------------------------------------

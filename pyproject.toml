@@ -101,10 +101,17 @@ ignore = [
 "scripts/**" = [
     "T201",   # 原型脚本允许 print
 ]
+".github/workflows/scripts/**" = [
+    "T201",   # CI 脚本用 print 输出 e2e 结果
+    "S603",   # subprocess 调用是 CI 脚本本职
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "provider_matrix: e2e against real LLM providers (auto-skip locally without API keys; CI runs via .github/workflows/scripts/provider_e2e.py)",
+]
 addopts = [
     "--strict-markers",
     "--strict-config",

@@ -397,3 +397,60 @@ async def test_chat_forwards_max_tokens() -> None:
 
     call_kwargs = mock_call.call_args.kwargs
     assert call_kwargs.get("max_tokens") == 8192
+
+
+# ---------------------------------------------------------------------------
+# Prompt caching (Phase 2 M8) — Anthropic cache_control on system message
+# ---------------------------------------------------------------------------
+
+
+def _build_kwargs_with_system(
+    provider: LiteLLMProvider, system_text: str = "You are Krodo."
+) -> dict[str, Any]:
+    """Helper: call _build_kwargs with a system + user message pair."""
+    return provider._build_kwargs(  # noqa: SLF001 — test accesses private method
+        messages=[
+            Message(role="system", content=system_text),
+            Message(role="user", content="hi"),
+        ],
+        tools=None,
+    )
+
+
+def test_prompt_cache_default_on_for_anthropic() -> None:
+    """Default prompt_cache=True tags the system message for Anthropic models."""
+    provider = LiteLLMProvider(model="anthropic/claude-sonnet-4-5-20250929")
+    kwargs = _build_kwargs_with_system(provider)
+    assert kwargs["messages"][0]["cache_control"] == {"type": "ephemeral"}
+    # Non-system messages are NOT tagged (only the prompt prefix is worth caching)
+    assert "cache_control" not in kwargs["messages"][1]
+
+
+def test_prompt_cache_disabled_no_tag() -> None:
+    """prompt_cache=False must not tag any message."""
+    provider = LiteLLMProvider(
+        model="anthropic/claude-sonnet-4-5-20250929",
+        prompt_cache=False,
+    )
+    kwargs = _build_kwargs_with_system(provider)
+    for msg in kwargs["messages"]:
+        assert "cache_control" not in msg
+
+
+def test_prompt_cache_skipped_for_non_anthropic() -> None:
+    """OpenAI/Gemini cache provider-side — no cache_control tag from krodo."""
+    provider = LiteLLMProvider(model="openai/gpt-4o")
+    kwargs = _build_kwargs_with_system(provider)
+    for msg in kwargs["messages"]:
+        assert "cache_control" not in msg
+
+
+def test_prompt_cache_noop_without_system_message() -> None:
+    """If there's no system message (edge case), cache_control is not added
+    and _build_kwargs does not crash."""
+    provider = LiteLLMProvider(model="anthropic/claude-sonnet-4-5-20250929")
+    kwargs = provider._build_kwargs(  # noqa: SLF001
+        messages=[Message(role="user", content="hi")],
+        tools=None,
+    )
+    assert "cache_control" not in kwargs["messages"][0]
