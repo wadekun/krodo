@@ -74,9 +74,7 @@ async def test_repl_session_cycle_closes_indexer_on_normal_exit(
     indexer = MagicMock()
     components = _components(tmp_path, indexer=indexer)
 
-    monkeypatch.setattr(
-        "krodo.cli.repl.run_repl", AsyncMock(return_value=None), raising=False
-    )
+    monkeypatch.setattr("krodo.cli.repl.run_repl", AsyncMock(return_value=None), raising=False)
 
     async def _rebuild(_session_id: str) -> SessionComponents:
         raise AssertionError("rebuild should not be called — run_repl returned None")
@@ -116,9 +114,7 @@ async def test_repl_session_cycle_none_indexer_is_noop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     components = _components(tmp_path, indexer=None)
-    monkeypatch.setattr(
-        "krodo.cli.repl.run_repl", AsyncMock(return_value=None), raising=False
-    )
+    monkeypatch.setattr("krodo.cli.repl.run_repl", AsyncMock(return_value=None), raising=False)
 
     async def _rebuild(_session_id: str) -> SessionComponents:
         raise AssertionError("rebuild should not be called")
