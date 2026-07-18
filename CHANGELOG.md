@@ -40,6 +40,23 @@ once v0.1.0 is tagged.
 ### Changed
 - (No unreleased changes.)
 
+### Fixed
+- **`tree-sitter` pinned to `<0.26`** (Phase 2 M9). `tree-sitter` 0.26.0 has a
+  `Point.row`/`Point.column` reference-counting bug ([py-tree-sitter#466](https://github.com/tree-sitter/py-tree-sitter/pull/466),
+  merged upstream but not yet released) that frees the backing int too early;
+  under enough non-cached (>256) `Point` reads in one process — exactly what
+  symbol extraction does on any real multi-symbol file — the freed memory gets
+  reused and a later read segfaults (SIGSEGV). Reproduced deterministically on
+  real-world Python files (e.g. `httpx`, ~40% of files) on macOS arm64, Linux
+  arm64, and Linux amd64; narrowing the pin to `tree-sitter>=0.25,<0.26` is the
+  upstream-confirmed workaround (see [py-tree-sitter#472](https://github.com/tree-sitter/py-tree-sitter/issues/472)).
+  Since `symbol_backend` defaults to `treesitter`, any fresh install on 0.26.0
+  would crash at session start while building the index — this is not a
+  platform-specific edge case. Full diagnosis in
+  `docs/benchmarks/m9_symbol_index_perf_results.md`. Once py-tree-sitter
+  releases a version containing #466, the pin can be relaxed to `<0.27` after
+  re-verifying with the `scan.py` benchmark script.
+
 ## [0.1.1] — 2026-06-28
 
 ### Added
