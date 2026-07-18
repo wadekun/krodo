@@ -840,6 +840,7 @@ krodo/
       core/               # Agent loop, Context, Session
       llm/                # LLMProvider Protocol + LiteLLM 适配
       tools/              # 内置工具实现（fs, shell, patch, search, git）
+      indexer/            # tree-sitter 符号索引（Phase 2 M9 数据地基，M10/M11 消费）
       sandbox/            # 审批 + 路径围栏 + 命令策略
       memory/             # SQLite + AGENTS.md + 可选 vector
       obs/                # structlog + OTEL + Langfuse exporter
@@ -857,7 +858,8 @@ krodo/
 
 子模块强制内部边界：
 - `core` 只能依赖 `llm` / `tools` / `sandbox` / `memory` / `obs`；不允许反向依赖。
-- `tools` 只能依赖 `sandbox` / `memory` / `obs`；不允许依赖 `core`。
+- `tools` 只能依赖 `sandbox` / `memory` / `obs`；不允许依赖 `core`。`tools` 引用符号索引**只经 `indexer.base.SymbolBackend` Protocol**（`ToolContext.indexer`），不依赖 `TreeSitterSymbolIndex` 实现——二者可独立替换。
+- `indexer` 只能依赖 `sandbox`（`KrodoIgnore` 过滤）/ `obs`；不依赖 `core` / `tools` / `llm`。它是纯数据层：提取 + 存储 + 查询，不感知 agent loop。`cli` 负责组装（构造索引、`build_full`、注入 `ToolContext`、发 `INDEX_BUILD` 事件、`doctor` 读统计）。
 - `cli` / `tui` 是 thin layer，只调用 `core` 暴露的 facade，不直接拼 messages 或调 LLM。
 - 用 [`import-linter`](https://import-linter.readthedocs.io/)（独立工具，非 ruff 插件）定义模块依赖契约（`.importlinter`），或自写 CI 脚本检查 import 规则；ruff 本身不提供模块边界检查能力。
 

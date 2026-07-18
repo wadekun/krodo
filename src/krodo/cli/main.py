@@ -37,7 +37,7 @@ from krodo.cli.resume import register_resume_app
 from krodo.cli.undo import register_undo_app
 from krodo.core.budget import BudgetCalculator, get_context_window
 from krodo.core.compression import make_compressor
-from krodo.core.config import load_config
+from krodo.core.config import load_config, resolve_symbol_backend
 from krodo.core.context import InMemoryContextManager
 from krodo.core.events import SessionEventLogger
 from krodo.core.loop import AgentLoop, LoopConfig
@@ -63,6 +63,7 @@ if TYPE_CHECKING:
     import logging
 
     from krodo.core.loop import TurnResult
+    from krodo.indexer.base import SymbolBackend
 
 # Module-level Rich Console for shared rendering (banners, panels, the
 # prompt→response "Thinking…" spinner). Same instance as banner.py / repl.py
@@ -156,6 +157,9 @@ class SessionComponents:
     max_tokens: int
     cost_tracker: CostTracker
     approval: TerminalApprovalManager
+    # M9: symbol index (None when symbol_backend == "off"). Surfaced so the
+    # REPL / doctor can read stats without re-opening the database.
+    indexer: SymbolBackend | None = None
 
 
 def _collect_written_paths(sessions_path: Path) -> list[str]:
@@ -345,6 +349,9 @@ def main(
     # can opt out by setting `prompt_cache: false`. Defaults to True so
     # Anthropic system-prompt caching is on out of the box.
     prompt_cache_value = cfg.prompt_cache if cfg.prompt_cache is not None else True
+    # M9: symbol index backend — config-only (no CLI flag). Defaults to
+    # "treesitter" (on); set `symbol_backend: off` to skip building/injecting.
+    symbol_backend_value = resolve_symbol_backend(cfg.symbol_backend)
 
     import asyncio  # noqa: PLC0415
 
@@ -370,6 +377,7 @@ def main(
             max_tokens=max_tokens,
             summary_window=summary_window,
             prompt_cache=prompt_cache_value,
+            symbol_backend=symbol_backend_value,
         )
         if effective_prompt:
             await _run_headless(effective_prompt, components)
@@ -388,6 +396,7 @@ def main(
                     max_tokens=max_tokens,
                     summary_window=summary_window,
                     prompt_cache=prompt_cache_value,
+                    symbol_backend=symbol_backend_value,
                     resume_session_id=target_id,
                 )
 
@@ -437,6 +446,56 @@ def _quick_resolve_root() -> Path:
 # ---------------------------------------------------------------------------
 
 
+def _build_symbol_index(
+    workspace: Workspace,
+    ignore: KrodoIgnore,
+    symbol_backend: str,
+    event_logger: SessionEventLogger,
+    logger: logging.Logger,
+) -> SymbolBackend | None:
+    """Construct + build the symbol index, or return ``None`` when disabled.
+
+    Emits an ``INDEX_BUILD`` event and prints a one-line status so the user can
+    see the backend, symbol count, and build time. A build failure is logged
+    and downgraded to "no index" — the session continues either way, since the
+    index is an enhancement, not a hard dependency.
+    """
+    from rich.console import Console as _Console  # noqa: PLC0415
+
+    if symbol_backend == "off":
+        _Console(stderr=True).print("[dim]symbols: off[/dim]")
+        return None
+
+    from krodo.core.types import SessionEventType  # noqa: PLC0415
+    from krodo.indexer import TreeSitterSymbolIndex  # noqa: PLC0415
+
+    db_path = workspace.root / ".krodo" / "index" / "symbols.db"
+    idx = TreeSitterSymbolIndex(db_path, workspace.root, ignore=ignore)
+    try:
+        stats = idx.build_full()
+    except Exception:  # noqa: BLE001 — never abort the session over the index
+        idx.close()
+        logger.warning("symbol index build failed", exc_info=True)
+        _Console(stderr=True).print("[yellow]symbols: build failed (index disabled)[/yellow]")
+        return None
+
+    event_logger.emit(
+        SessionEventType.INDEX_BUILD,
+        data={
+            "backend": stats.backend,
+            "files": stats.files_indexed,
+            "symbols": stats.symbols,
+            "references": stats.references,
+            "build_ms": stats.build_ms,
+        },
+    )
+    _Console(stderr=True).print(
+        f"[dim]symbols: {stats.backend} | {stats.files_indexed} files, "
+        f"{stats.symbols} symbols ({stats.build_ms} ms)[/dim]"
+    )
+    return idx
+
+
 def _build_session_components(
     *,
     root: Path | None,
@@ -449,6 +508,7 @@ def _build_session_components(
     summary_window: int = 2,  # noqa: ARG001  (reserved for M5 compactor wiring)
     resume_session_id: str | None = None,
     prompt_cache: bool = True,
+    symbol_backend: str = "treesitter",
 ) -> SessionComponents:
     """Wire workspace, logger, banner, provider, tools, and AgentLoop.
 
@@ -587,6 +647,9 @@ def _build_session_components(
     ignore = KrodoIgnore.from_workspace(workspace)
     checkpoint_mgr = GitCheckpointManager(workspace, logger=logger)
 
+    # M9: symbol index (built once at session start; None when disabled).
+    indexer = _build_symbol_index(workspace, ignore, symbol_backend, event_logger, logger)
+
     tool_ctx = ToolContext(
         workspace=workspace,
         sandbox=sandbox,
@@ -595,6 +658,7 @@ def _build_session_components(
         ignore=ignore,
         checkpoint=checkpoint_mgr,
         event_logger=event_logger,
+        indexer=indexer,
     )
 
     loop_config = LoopConfig(max_tool_calls_per_turn=max_tool_calls)
@@ -654,6 +718,7 @@ def _build_session_components(
         max_tokens=max_tokens,
         cost_tracker=cost_tracker,
         approval=approval_manager,
+        indexer=indexer,
     )
 
 

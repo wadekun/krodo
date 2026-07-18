@@ -88,6 +88,11 @@ class SessionEventType(StrEnum):
     UNDO = "undo"
     COMPRESSION = "compression"
     COST_SNAPSHOT = "cost_snapshot"
+    # M9: symbol-index lifecycle. INDEX_BUILD fires at session start after
+    # build_full; INDEX_UPDATE is reserved for future incremental hooks. Both
+    # are metadata-only and replayed as no-ops.
+    INDEX_BUILD = "index_build"
+    INDEX_UPDATE = "index_update"
     ERROR = "error"
 
 

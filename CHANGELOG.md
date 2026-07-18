@@ -23,6 +23,19 @@ once v0.1.0 is tagged.
   (lower latency + cost on long sessions). Defaults on; opt out via
   `prompt_cache: false` in `.krodo/config.yaml`. No-op for OpenAI/Gemini
   (they cache provider-side automatically).
+- **tree-sitter symbol index** (Phase 2 M9). New `src/krodo/indexer/` module
+  extracts symbol definitions/references (Python / JavaScript / TypeScript /
+  Go) into a SQLite index (`SymbolBackend` Protocol + `TreeSitterSymbolIndex`
+  impl). This is the data foundation for M10 (repo-map) and M11 (symbol
+  tools) — no tools are registered yet. Built once at session start
+  (incremental across sessions via stored mtime+size); an `INDEX_BUILD` event
+  is recorded and `krodo doctor` shows the stats. New config key
+  `symbol_backend` (`treesitter` default, `off` to disable; `lsp` reserved for
+  Phase 3).
+- **Write-tool index invalidation** (Phase 2 M9). `write_file` / `edit_file` /
+  `apply_patch` invalidate the index for the files they touch after a
+  successful write; the next query re-extracts only those files, so a renamed
+  symbol is visible immediately without a rebuild.
 
 ### Changed
 - (No unreleased changes.)

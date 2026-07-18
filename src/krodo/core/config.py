@@ -24,11 +24,16 @@ import tomllib
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, field_validator
 
 from krodo.core.types import ApprovalMode
 
 logger = logging.getLogger(__name__)
+
+
+# Backends recognised by the symbol index (M9). ``lsp`` is intentionally NOT in
+# this set — it is a Phase 3 backend, rejected up-front with a friendly message.
+_KNOWN_SYMBOL_BACKENDS = frozenset({"treesitter", "off"})
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +60,46 @@ class KrodoConfig(BaseModel):
     # when unset here; set to False in config.yaml to disable for cases
     # where cache-write cost outweighs the benefit (very short sessions).
     prompt_cache: bool | None = None
+    # Symbol index backend (M9). Accepts a scalar or a list so the schema is
+    # ready for the Phase 3 fallback chain (e.g. ``[lsp, treesitter]``). M9
+    # only implements ``treesitter``; ``off`` disables indexing. See
+    # ``resolve_symbol_backend`` for the canonical decision.
+    symbol_backend: str | list[str] | None = None
+
+    @field_validator("symbol_backend")
+    @classmethod
+    def _check_symbol_backend(cls, v: str | list[str] | None) -> str | list[str] | None:
+        if v is None:
+            return v
+        values = list(v) if isinstance(v, list) else [v]
+        if not values:
+            raise ValueError("symbol_backend: empty list; legal values: treesitter, off")
+        unique = set(values)
+        if "lsp" in unique:
+            raise ValueError(
+                "symbol_backend 'lsp' is a Phase 3 backend (not yet implemented); "
+                "current options: treesitter, off"
+            )
+        unknown = unique - _KNOWN_SYMBOL_BACKENDS
+        if unknown:
+            raise ValueError(
+                f"symbol_backend: unknown value(s) {sorted(unknown)}; legal: treesitter, off"
+            )
+        if len(unique) > 1:
+            raise ValueError("symbol_backend: cannot combine treesitter and off; choose one")
+        return v
+
+
+def resolve_symbol_backend(value: str | list[str] | None) -> str:
+    """Reduce a validated ``symbol_backend`` value to ``"treesitter"`` or ``"off"``.
+
+    Unset (``None``) defaults to ``"treesitter"`` — the index is on out of the
+    box. The value is assumed already validated by :class:`KrodoConfig`.
+    """
+    if value is None:
+        return "treesitter"
+    values = set(value) if isinstance(value, list) else {value}
+    return "off" if values == {"off"} else "treesitter"
 
 
 # ---------------------------------------------------------------------------
