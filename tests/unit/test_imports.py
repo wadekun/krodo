@@ -17,6 +17,7 @@ EXPECTED_SUBMODULES = (
     "krodo",
     "krodo.cli",
     "krodo.core",
+    "krodo.indexer",
     "krodo.llm",
     "krodo.memory",
     "krodo.obs",
