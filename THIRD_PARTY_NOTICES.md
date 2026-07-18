@@ -22,7 +22,7 @@ are adapted from the **Aider** project.
   `5dc9490bb35f9729ef2c95d00a19ccd30c26339c`
 - **Upstream grammar source**: the underlying tree-sitter grammars are
   distributed by
-  [Goldziher/tree-sitter-language-pack](https://github.com/Goldziher/tree-sitter-language-pack),
+  [xberg-io/tree-sitter-language-pack](https://github.com/xberg-io/tree-sitter-language-pack),
   which documents each grammar's license. Aider's `queries/README.md` (same
   commit) attributes them there. The Python/JavaScript/TypeScript/Go grammars
   are MIT-licensed and compatible with krodo's Apache-2.0.

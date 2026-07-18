@@ -2,7 +2,7 @@
 ;; python-tags.scm — tree-sitter tag query.
 ;; ---------------------------------------------------------------------------
 ;; Source:      Aider <aider/queries/tree-sitter-language-pack/python-tags.scm>
-;; Upstream:    https://github.com/Goldziher/tree-sitter-language-pack (MIT)
+;; Upstream:    https://github.com/xberg-io/tree-sitter-language-pack (MIT)
 ;; Aider:       https://github.com/Aider-AI/aider (Apache-2.0)
 ;; Aider commit 5dc9490bb35f9729ef2c95d00a19ccd30c26339c
 ;; License:     MIT (upstream grammar) — compatible with krodo Apache-2.0.
