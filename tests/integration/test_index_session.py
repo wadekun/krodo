@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -103,6 +104,53 @@ def test_off_mode_returns_none(tmp_path: Path) -> None:
     assert idx is None
     # no index database created in off mode
     assert not (tmp_path / ".krodo" / "index" / "symbols.db").exists()
+
+
+# ---------------------------------------------------------------------------
+# Canary defense (M9 closeout): a failed native-crash probe disables the
+# index for the session instead of letting build_full() crash the process.
+# ---------------------------------------------------------------------------
+
+
+def test_canary_failure_disables_index_session_continues(tmp_path: Path) -> None:
+    """A failed canary probe returns None — no index, but the session is fine."""
+    (tmp_path / "mod.py").write_text("def alpha():\n    return 1\n", encoding="utf-8")
+    ws = _workspace(tmp_path)
+
+    with patch("krodo.indexer.canary.probe") as mock_probe:
+        mock_probe.return_value = (False, "canary probe exited -11 (1 files sampled)")
+        idx = _build_symbol_index(
+            ws,
+            KrodoIgnore(tmp_path),
+            "treesitter",
+            _event_logger(tmp_path),
+            logging.getLogger("test"),  # type: ignore[arg-type]
+        )
+
+    assert idx is None
+    mock_probe.assert_called_once()
+    # build_full() never runs, so no DB is created either.
+    assert not (tmp_path / ".krodo" / "index" / "symbols.db").exists()
+
+
+def test_canary_success_index_builds_normally(tmp_path: Path) -> None:
+    """A successful canary probe still leads to a normal build_full()."""
+    (tmp_path / "mod.py").write_text("def alpha():\n    return 1\n", encoding="utf-8")
+    ws = _workspace(tmp_path)
+
+    with patch("krodo.indexer.canary.probe") as mock_probe:
+        mock_probe.return_value = (True, None)
+        idx = _build_symbol_index(
+            ws,
+            KrodoIgnore(tmp_path),
+            "treesitter",
+            _event_logger(tmp_path),
+            logging.getLogger("test"),  # type: ignore[arg-type]
+        )
+
+    assert idx is not None
+    assert idx.find_symbol("alpha")
+    idx.close()
 
 
 # ---------------------------------------------------------------------------

@@ -195,6 +195,11 @@ async def repl_session_cycle(
     current = components
     while True:
         target = await run_repl(current)
+        # M9: close the symbol index (DB connection) whenever we're done with
+        # `current` — either the REPL exited for good, or `:resume` is about
+        # to swap in a freshly-built `SessionComponents` for `target`.
+        if current.indexer is not None:
+            current.indexer.close()
         if target is None:
             return
         current = build_resumed_components(target, rebuild)

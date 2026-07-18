@@ -114,3 +114,13 @@ class SymbolBackend(Protocol):
         a lazy single-file re-extract.
         """
         ...
+
+    def close(self) -> None:
+        """Release any resources held by this backend (e.g. the DB connection).
+
+        Called once when the session/REPL loop that owns this backend ends
+        (headless exit, REPL exit, and before rebuilding components on
+        ``:resume``). Idempotent implementations are encouraged but not
+        required — callers only call this once per instance.
+        """
+        ...

@@ -466,6 +466,22 @@ def _build_symbol_index(
         _Console(stderr=True).print("[dim]symbols: off[/dim]")
         return None
 
+    # Canary: probe a sample of real workspace files in a subprocess before
+    # touching tree-sitter in-process. A native crash (SIGSEGV/SIGBUS — see
+    # docs/benchmarks/m9_symbol_index_perf_results.md) would otherwise kill
+    # the whole session during build_full(); the canary lets us degrade to
+    # "no index" instead. Best-effort only — see canary.py module docstring
+    # for residual risk.
+    from krodo.indexer import canary  # noqa: PLC0415
+
+    canary_ok, canary_detail = canary.probe(workspace.root, ignore)
+    if not canary_ok:
+        logger.warning("symbol index canary probe failed: %s", canary_detail)
+        _Console(stderr=True).print(
+            "[yellow]symbols: canary probe failed (index disabled this session)[/yellow]"
+        )
+        return None
+
     from krodo.core.types import SessionEventType  # noqa: PLC0415
     from krodo.indexer import TreeSitterSymbolIndex  # noqa: PLC0415
 
@@ -750,6 +766,8 @@ async def _run_headless(prompt: str, components: SessionComponents) -> None:
         result.aborted_by_user,
         result.hit_tool_call_limit,
     )
+    if components.indexer is not None:
+        components.indexer.close()
 
 
 def _echo_turn_result(result: TurnResult) -> None:
