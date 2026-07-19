@@ -65,6 +65,12 @@ class KrodoConfig(BaseModel):
     # only implements ``treesitter``; ``off`` disables indexing. See
     # ``resolve_symbol_backend`` for the canonical decision.
     symbol_backend: str | list[str] | None = None
+    # Repo-map (M10): inject a PageRank-ranked signature tree of the workspace
+    # as a <repo_map> context message. ``repo_map`` toggles it (default on when
+    # the symbol index is on); ``repo_map_tokens`` caps its size. Both are
+    # config-only (no CLI flag), mirroring ``prompt_cache`` / ``symbol_backend``.
+    repo_map: bool | None = None
+    repo_map_tokens: int | None = None
 
     @field_validator("symbol_backend")
     @classmethod
@@ -89,6 +95,15 @@ class KrodoConfig(BaseModel):
             raise ValueError("symbol_backend: cannot combine treesitter and off; choose one")
         return v
 
+    @field_validator("repo_map_tokens")
+    @classmethod
+    def _check_repo_map_tokens(cls, v: int | None) -> int | None:
+        if v is None:
+            return v
+        if v <= 0:
+            raise ValueError("repo_map_tokens must be a positive integer")
+        return v
+
 
 def resolve_symbol_backend(value: str | list[str] | None) -> str:
     """Reduce a validated ``symbol_backend`` value to ``"treesitter"`` or ``"off"``.
@@ -100,6 +115,19 @@ def resolve_symbol_backend(value: str | list[str] | None) -> str:
         return "treesitter"
     values = set(value) if isinstance(value, list) else {value}
     return "off" if values == {"off"} else "treesitter"
+
+
+def resolve_repo_map(value: bool | None) -> bool:
+    """``repo_map`` resolves to True by default (when the index is on)."""
+    return value if value is not None else True
+
+
+_DEFAULT_REPO_MAP_TOKENS = 2048
+
+
+def resolve_repo_map_tokens(value: int | None) -> int:
+    """``repo_map_tokens`` defaults to 2048."""
+    return value if value is not None else _DEFAULT_REPO_MAP_TOKENS
 
 
 # ---------------------------------------------------------------------------

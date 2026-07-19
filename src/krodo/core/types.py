@@ -93,6 +93,10 @@ class SessionEventType(StrEnum):
     # are metadata-only and replayed as no-ops.
     INDEX_BUILD = "index_build"
     INDEX_UPDATE = "index_update"
+    # M10: repo-map rendered into a <repo_map> context message. Metadata-only —
+    # the message content itself lives in the conversation history, so replay
+    # treats it as a no-op (the map is re-derived from the index on resume).
+    REPO_MAP = "repo_map"
     ERROR = "error"
 
 

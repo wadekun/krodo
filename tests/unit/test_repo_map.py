@@ -209,3 +209,69 @@ def test_build_graph_caps_ambiguous_names() -> None:
     out2, _ = build_graph(_FakeBackend(syms2, [_ref("caller2.py", 2, "shared")]))
     assert set(out2["caller2.py"]) == {f"g{i}.py" for i in range(10)}
     assert abs(sum(out2["caller2.py"].values()) - 1.0) < 1e-9
+
+
+# --------------------------------------------------------------------------
+# RepoMapManager — version-gated refresh (PR2①)
+# --------------------------------------------------------------------------
+
+
+class _MutableBackend:
+    """IterableSymbolBackend whose version + data can be mutated between calls."""
+
+    def __init__(self, symbols: list[SymbolDef], refs: list[SymbolRef]) -> None:
+        self.symbols = symbols
+        self.refs = refs
+        self.version = 0
+
+    def iter_symbols(self) -> Iterator[SymbolDef]:
+        return iter(self.symbols)
+
+    def iter_refs(self) -> Iterator[SymbolRef]:
+        return iter(self.refs)
+
+
+def test_manager_initial_render_records_version() -> None:
+    from krodo.memory.repo_map import RepoMapManager
+
+    backend = _MutableBackend([_sym("a.py", 1, "alpha")], [])
+    backend.version = 5
+    mgr = RepoMapManager(backend, 2048, _char_count)
+    text = mgr.initial_render()
+    assert "alpha" in text
+    assert mgr.last_version == 5  # read after render
+
+
+def test_manager_render_if_changed_skips_when_version_unchanged() -> None:
+    from krodo.memory.repo_map import RepoMapManager
+
+    backend = _MutableBackend([_sym("a.py", 1, "alpha")], [])
+    mgr = RepoMapManager(backend, 2048, _char_count)
+    mgr.initial_render()
+    # No version change → None (no re-render, no history mutation).
+    assert mgr.render_if_changed() is None
+
+
+def test_manager_render_if_changed_none_when_bytes_identical() -> None:
+    from krodo.memory.repo_map import RepoMapManager
+
+    backend = _MutableBackend([_sym("a.py", 1, "alpha")], [])
+    mgr = RepoMapManager(backend, 2048, _char_count)
+    mgr.initial_render()
+    backend.version += 1  # version changed...
+    # ...but the data is identical → re-render produces same bytes → None
+    assert mgr.render_if_changed() is None
+
+
+def test_manager_render_if_changed_returns_new_text_when_data_changes() -> None:
+    from krodo.memory.repo_map import RepoMapManager
+
+    backend = _MutableBackend([_sym("a.py", 1, "alpha")], [])
+    mgr = RepoMapManager(backend, 2048, _char_count)
+    first = mgr.initial_render()
+    backend.version += 1
+    backend.symbols.append(_sym("b.py", 1, "beta"))  # data actually changed
+    new = mgr.render_if_changed()
+    assert new is not None
+    assert new != first
+    assert "beta" in new

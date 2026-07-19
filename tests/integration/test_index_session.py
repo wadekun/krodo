@@ -229,3 +229,119 @@ async def test_indexer_none_skips_hook_cleanly(tmp_path: Path) -> None:
         {"path": "mod.py", "old_string": "def alpha():", "new_string": "def beta():"}, ctx
     )
     assert not result.is_error  # hook is None-safe; write still works
+
+
+# ---------------------------------------------------------------------------
+# Repo-map injection + refresh (M10 PR2①)
+# ---------------------------------------------------------------------------
+
+
+class _FakeProvider:
+    """Just enough of LiteLLMProvider for repo-map rendering (count_tokens)."""
+
+    def count_tokens(self, text: str) -> int:
+        return len(text)
+
+
+def _index_with(root: Path) -> TreeSitterSymbolIndex:
+    idx = TreeSitterSymbolIndex(
+        root / ".krodo" / "index" / "symbols.db", root, ignore=KrodoIgnore(root)
+    )
+    idx.build_full()
+    return idx
+
+
+def test_repo_map_injects_after_project_memory(tmp_path: Path) -> None:
+    from krodo.cli.main import _build_repo_map_manager
+    from krodo.core.context import InMemoryContextManager
+    from krodo.core.events import SessionEventLogger
+    from krodo.core.types import Message
+
+    (tmp_path / "a.py").write_text("def alpha():\n    return 1\n", encoding="utf-8")
+    idx = _index_with(tmp_path)
+    ctx = InMemoryContextManager(system_prompt="sys")
+    ctx._history.append(  # noqa: SLF001
+        Message(role="user", content="<project_memory>\nAGENTS\n</project_memory>")
+    )
+    elog = SessionEventLogger(session_id="t", store=None)
+    mgr = _build_repo_map_manager(idx, True, 2048, _FakeProvider(), ctx, elog)
+    try:
+        assert mgr is not None
+        assert mgr.slot == 1  # right after <project_memory> at [0]
+        content = ctx._history[1].content
+        assert isinstance(content, str)
+        assert content.startswith("<repo_map>")
+        assert "alpha" in content
+    finally:
+        idx.close()
+
+
+def test_repo_map_injects_at_slot_0_without_project_memory(tmp_path: Path) -> None:
+    from krodo.cli.main import _build_repo_map_manager
+    from krodo.core.context import InMemoryContextManager
+    from krodo.core.events import SessionEventLogger
+
+    (tmp_path / "a.py").write_text("def alpha():\n    return 1\n", encoding="utf-8")
+    idx = _index_with(tmp_path)
+    ctx = InMemoryContextManager(system_prompt="sys")
+    elog = SessionEventLogger(session_id="t", store=None)
+    mgr = _build_repo_map_manager(idx, True, 2048, _FakeProvider(), ctx, elog)
+    try:
+        assert mgr is not None and mgr.slot == 0  # no project_memory → head
+        assert ctx._history[0].content.startswith("<repo_map>")  # type: ignore[union-attr]
+    finally:
+        idx.close()
+
+
+def test_repo_map_disabled_returns_none(tmp_path: Path) -> None:
+    from krodo.cli.main import _build_repo_map_manager
+    from krodo.core.context import InMemoryContextManager
+    from krodo.core.events import SessionEventLogger
+
+    (tmp_path / "a.py").write_text("def alpha():\n    pass\n", encoding="utf-8")
+    idx = _index_with(tmp_path)
+    ctx = InMemoryContextManager(system_prompt="sys")
+    elog = SessionEventLogger(session_id="t", store=None)
+    mgr = _build_repo_map_manager(idx, False, 2048, _FakeProvider(), ctx, elog)
+    idx.close()
+    assert mgr is None  # repo_map=False → no manager, no injection
+    assert ctx._history == []
+
+
+def test_refresh_repo_map_reflects_write(tmp_path: Path) -> None:
+    """refresh_repo_map re-renders <repo_map> after a write bumps the version."""
+    import types
+
+    from krodo.cli.main import _build_repo_map_manager, refresh_repo_map
+    from krodo.core.context import InMemoryContextManager
+    from krodo.core.events import SessionEventLogger
+    from krodo.core.types import Message
+
+    (tmp_path / "a.py").write_text("def alpha():\n    return 1\n", encoding="utf-8")
+    idx = _index_with(tmp_path)
+    ctx = InMemoryContextManager(system_prompt="sys")
+    ctx._history.append(  # noqa: SLF001
+        Message(role="user", content="<project_memory>\nAGENTS\n</project_memory>")
+    )
+    elog = SessionEventLogger(session_id="t", store=None)
+    mgr = _build_repo_map_manager(idx, True, 2048, _FakeProvider(), ctx, elog)
+    assert mgr is not None
+    components = types.SimpleNamespace(
+        loop=types.SimpleNamespace(context_manager=ctx),
+        repo_map_manager=mgr,
+        event_logger=elog,
+    )
+    try:
+        before = ctx._history[1].content
+        assert isinstance(before, str) and "alpha" in before and "beta" not in before
+
+        # A write adds a new file; invalidate bumps version (optimistic).
+        (tmp_path / "b.py").write_text("def beta():\n    pass\n", encoding="utf-8")
+        idx.invalidate(["b.py"])
+
+        refresh_repo_map(components)  # type: ignore[arg-type]
+        after = ctx._history[1].content
+        assert isinstance(after, str)
+        assert "beta" in after  # new symbol now reflected, no rebuild
+    finally:
+        idx.close()

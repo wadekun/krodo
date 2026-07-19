@@ -8,7 +8,13 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
-from krodo.core.config import KrodoConfig, load_config, resolve_symbol_backend
+from krodo.core.config import (
+    KrodoConfig,
+    load_config,
+    resolve_repo_map,
+    resolve_repo_map_tokens,
+    resolve_symbol_backend,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -229,3 +235,41 @@ class TestResolveSymbolBackend:
     @pytest.mark.parametrize("value", ["off", ["off"]])
     def test_off_forms(self, value: object) -> None:
         assert resolve_symbol_backend(value) == "off"  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# 8. repo_map / repo_map_tokens (M10)
+# ---------------------------------------------------------------------------
+
+
+class TestRepoMapConfig:
+    def test_defaults_are_none(self) -> None:
+        cfg = KrodoConfig()
+        assert cfg.repo_map is None
+        assert cfg.repo_map_tokens is None
+
+    def test_repo_map_accepts_bool(self) -> None:
+        assert KrodoConfig(repo_map=True).repo_map is True
+        assert KrodoConfig(repo_map=False).repo_map is False
+
+    def test_repo_map_tokens_must_be_positive(self) -> None:
+        with pytest.raises(ValidationError):
+            KrodoConfig(repo_map_tokens=0)
+        with pytest.raises(ValidationError):
+            KrodoConfig(repo_map_tokens=-512)
+        assert KrodoConfig(repo_map_tokens=1024).repo_map_tokens == 1024
+
+
+class TestRepoMapResolvers:
+    def test_repo_map_none_defaults_true(self) -> None:
+        assert resolve_repo_map(None) is True
+
+    def test_repo_map_passes_bool(self) -> None:
+        assert resolve_repo_map(True) is True
+        assert resolve_repo_map(False) is False
+
+    def test_repo_map_tokens_none_defaults_2048(self) -> None:
+        assert resolve_repo_map_tokens(None) == 2048
+
+    def test_repo_map_tokens_passes_int(self) -> None:
+        assert resolve_repo_map_tokens(1024) == 1024

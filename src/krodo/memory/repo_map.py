@@ -222,4 +222,63 @@ def _render_file_block(
     return "\n".join(parts)
 
 
-__all__ = ["build_graph", "pagerank", "render_map"]
+class RepoMapManager:
+    """Stateful, version-gated wrapper around :func:`render_map`.
+
+    The CLI injects a ``<repo_map>`` context message and refreshes it before
+    each turn. Re-rendering on every turn is too expensive on large repos
+    (ha-core ~3s); this class skips the render entirely when the index's
+    :attr:`~IterableSymbolBackend.version` is unchanged since the last render,
+    and reports a byte-identical re-render as "no change" so the caller can
+    keep the existing message bytes (prompt-cache friendly).
+
+    History mutation and event emission stay with the caller — this class only
+    decides *whether* to re-render and hands back the new text.
+
+    The ``version`` is read **after** rendering: ``render_map`` enumerates via
+    ``iter_*`` which flushes pending invalidations (bumping ``version``), so a
+    pre-render version would under-report and trigger a redundant re-render
+    next turn.
+    """
+
+    def __init__(
+        self,
+        backend: IterableSymbolBackend,
+        token_budget: int,
+        count_fn: Callable[[str], int],
+    ) -> None:
+        self.backend = backend
+        self.token_budget = token_budget
+        self.count_fn = count_fn
+        self.last_text: str | None = None  # None = never rendered
+        self.last_version: int = -1
+        # History index of the <repo_map> message, owned/set by the caller.
+        self.slot: int | None = None
+
+    def initial_render(self) -> str:
+        """Render once at session start; record post-render version. May be ''."""
+        text = render_map(self.backend, self.token_budget, self.count_fn)
+        self.last_text = text
+        self.last_version = self.backend.version
+        return text
+
+    def render_if_changed(self) -> str | None:
+        """Re-render iff the index version changed since the last render.
+
+        Returns the new text (possibly ``''``) when both the version changed
+        AND the bytes differ — the caller should then replace/insert/remove
+        the message. Returns ``None`` when nothing changed (version unchanged
+        or byte-identical re-render) so the caller can skip history mutation
+        and preserve the prompt cache.
+        """
+        if self.backend.version == self.last_version:
+            return None
+        text = render_map(self.backend, self.token_budget, self.count_fn)
+        self.last_version = self.backend.version  # read AFTER render
+        if text == self.last_text:
+            return None
+        self.last_text = text
+        return text
+
+
+__all__ = ["RepoMapManager", "build_graph", "pagerank", "render_map"]
