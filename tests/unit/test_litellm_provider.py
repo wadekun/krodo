@@ -454,3 +454,74 @@ def test_prompt_cache_noop_without_system_message() -> None:
         tools=None,
     )
     assert "cache_control" not in kwargs["messages"][0]
+
+
+# ---------------------------------------------------------------------------
+# Second cache breakpoint on the last stable-prefix message (M10 PR2②)
+# ---------------------------------------------------------------------------
+
+
+def _kwargs(provider: LiteLLMProvider, messages: list[Message]) -> dict[str, Any]:
+    return provider._build_kwargs(messages=messages, tools=None)  # noqa: SLF001
+
+
+def test_second_breakpoint_on_repo_map_when_present() -> None:
+    """system + <project_memory> + <repo_map> + turn → bp on system AND repo_map."""
+    provider = LiteLLMProvider(model="anthropic/claude-sonnet-4-5-20250929")
+    kwargs = _kwargs(
+        provider,
+        [
+            Message(role="system", content="sys"),
+            Message(role="user", content="<project_memory>\nAGENTS\n</project_memory>"),
+            Message(role="user", content="<repo_map>\nmap\n</repo_map>"),
+            Message(role="user", content="real question"),
+        ],
+    )
+    msgs = kwargs["messages"]
+    assert msgs[0]["cache_control"] == {"type": "ephemeral"}  # system (bp1)
+    assert "cache_control" not in msgs[1]  # project_memory — only last prefix tagged
+    assert msgs[2]["cache_control"] == {"type": "ephemeral"}  # repo_map (bp2, last prefix)
+    assert "cache_control" not in msgs[3]  # real turn
+
+
+def test_second_breakpoint_falls_back_to_project_memory() -> None:
+    """No <repo_map> → bp2 lands on <project_memory>."""
+    provider = LiteLLMProvider(model="anthropic/claude-sonnet-4-5-20250929")
+    kwargs = _kwargs(
+        provider,
+        [
+            Message(role="system", content="sys"),
+            Message(role="user", content="<project_memory>\nAGENTS\n</project_memory>"),
+            Message(role="user", content="real question"),
+        ],
+    )
+    msgs = kwargs["messages"]
+    assert msgs[0]["cache_control"] == {"type": "ephemeral"}
+    assert msgs[1]["cache_control"] == {"type": "ephemeral"}  # project_memory is last prefix
+    assert "cache_control" not in msgs[2]
+
+
+def test_no_second_breakpoint_without_prefix_messages() -> None:
+    """system + real turn only → just the system breakpoint, no bp2."""
+    provider = LiteLLMProvider(model="anthropic/claude-sonnet-4-5-20250929")
+    kwargs = _kwargs(
+        provider,
+        [Message(role="system", content="sys"), Message(role="user", content="hi")],
+    )
+    msgs = kwargs["messages"]
+    assert msgs[0]["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in msgs[1]
+
+
+def test_second_breakpoint_skipped_for_non_anthropic() -> None:
+    provider = LiteLLMProvider(model="openai/gpt-4o")
+    kwargs = _kwargs(
+        provider,
+        [
+            Message(role="system", content="sys"),
+            Message(role="user", content="<repo_map>\nm\n</repo_map>"),
+            Message(role="user", content="hi"),
+        ],
+    )
+    for msg in kwargs["messages"]:
+        assert "cache_control" not in msg
