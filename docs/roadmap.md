@@ -78,8 +78,18 @@ LiteLLM tool-use 与审批 UX。
 
 目标:从"能改文件"进化到"懂代码",TUI 上线,对接 MCP 生态。
 
+> Phase 2 按 milestone(M8→M12)顺序执行,下面任务编号与 milestone 的对应关系:
+> 2.1→M9、2.2→M10、2.3→M11、2.4/2.5→M12、2.6/2.7→M8。milestone 关闭时回来
+> 勾掉对应任务(见 [`AGENTS.md`](../AGENTS.md) "Documentation maintenance")。
+
 - **2.1 tree-sitter 符号索引** — 产出:增量索引器 + 启动加载 ｜ 验收:~10k
   文件项目首次索引 < 30s,增量更新 < 1s。
+  ✅ **M9 交付**:`src/krodo/indexer/`(`SymbolBackend` Protocol +
+  `TreeSitterSymbolIndex`,SQLite WAL,mtime+size 增量)。实测 ha-core 18k
+  文件冷构建 22–27s,查询 p95 ≤ 0.1ms,单文件增量 < 20ms(达标,详见
+  `docs/benchmarks/m9_symbol_index_perf_results.md`)。收尾额外修了一个
+  `tree-sitter` 0.26.0 的 native crash(pin `<0.26` + 子进程金丝雀防线)——
+  过程详见同一份 benchmark 文档。
 - **2.2 repo-map 注入** — 产出:Aider 式 PageRank repo-map 拼到 system
   prompt ｜ 验收:跨文件重构任务成功率较 Phase 1 baseline +20%。
 - **2.3 新工具** — `find_symbol` / `find_references` / `apply_patch v2`(多
@@ -90,8 +100,16 @@ LiteLLM tool-use 与审批 UX。
   MCP server(如 fetch、filesystem-extra)跑通。
 - **2.6 Provider 矩阵 CI** — 产出:CI 同时跑 Claude / GPT / Gemini / Ollama
   ｜ 验收:4 家全绿才允许 merge。
+  ✅ **M8 交付**,验收范围有调整:实际接入 5 家(Claude / GPT / Gemini /
+  DeepSeek / Z.AI GLM,未接 Ollama——本地模型留 Phase 2 后续或 Phase 3),且
+  `continue-on-error: true`(quota/网络抖动不挡 merge,而不是"全绿才允许
+  merge")。脚本:`.github/workflows/scripts/provider_e2e.py`。
 - **2.7 Prompt Caching** — 产出:默认开启 Anthropic / OpenAI prompt caching
   ｜ 验收:长会话成本降低 ≥ 30%(基线对比)。
+  ✅ **M8 交付**,验收范围有调整:`LiteLLMProvider` 对 `anthropic/*` 显式打
+  `cache_control: ephemeral`;OpenAI/Gemini 依赖 provider 侧自动缓存(无需
+  krodo 显式处理),因此没有做统一的"降低 ≥30%"基线对比——收益是 provider
+  原生能力,非 krodo 自算。
 
 **退出标准**:能在 ~10k 文件的真实开源项目(自选 1-2 个)上做跨文件重构 PR
 并合入。

@@ -10,7 +10,7 @@
 
 > 一个**本地优先、多 Provider** 的命令行 coding agent,基于 Python 3.12+。
 >
-> 状态: 🚧 **Pre-alpha (v0.1.1)** — Phase 1 功能完整 & 已上 PyPI(REPL + headless + pipe 三入口,11 个工具,JSONL 会话,三档审批模式)。Phase 2(TUI、MCP client、tree-sitter 符号索引)规划中。
+> 状态: 🚧 **Pre-alpha (v0.1.1)** — Phase 1 功能完整 & 已上 PyPI(REPL + headless + pipe 三入口,11 个工具,JSONL 会话,三档审批模式)。Phase 2 进行中——tree-sitter 符号索引、provider 矩阵 CI、Anthropic prompt caching 已交付;repo-map、Textual TUI、MCP client 在后。
 
 Krodo 是一个开源 coding agent,灵感来自 Claude Code、Codex CLI 和 Aider。它本地运行,通过工具(read / edit / shell / git / grep)操作你的代码库,通过 [LiteLLM](https://github.com/BerriAI/litellm) 支持任意 LLM provider — Anthropic、OpenAI、Gemini、DeepSeek、Qwen,以及通过 Ollama / vLLM 跑本地模型。
 
@@ -29,16 +29,12 @@ Krodo 是一个开源 coding agent,灵感来自 Claude Code、Codex CLI 和 Aide
 | Phase | 范围 | 状态 |
 |------:|:------|:----:|
 | 0 | 验证 ReAct loop 的单文件原型 | ✅ done |
-| 1 M1 | Walking skeleton(3 个工具,CLI,agent loop) | ✅ done |
-| 1 M2 | 完整工具集(11 个)+ 三档审批 + pattern trust | ✅ done |
-| 1 M3 | 上下文管理(token 预算 + 双策略压缩)+ 7 种错误恢复 | ✅ done |
-| 1 M4 | `.krodoignore` + git checkpoint + `krodo undo` + diff 预览 | ✅ done |
-| 1 M5 | 持久化与记忆:JSONL 会话、`krodo resume`、AGENTS.md、配置文件 | ✅ done |
-| 1 M6 | 流式输出 + cost 追踪 + pipe stdin + REPL slash 命令 + 审批持久化 | ✅ done |
-| 1 M7 | 品牌改名(Coda → krodo)+ mypy strict 清零 + 文档四件套 + GitHub release + dogfood PR | ✅ done |
-| 2 | tree-sitter 符号索引、repo-map、Textual TUI、MCP client | — |
+| 1 | 可用 CLI MVP:REPL + headless + pipe 三入口,11 个工具,三档审批模式,JSONL 会话,AGENTS.md 记忆 —— 已发布 v0.1.1 上 PyPI | ✅ done |
+| 2 | 深化代码理解:tree-sitter 符号索引、repo-map、Textual TUI、MCP client | 🚧 进行中 |
 | 3 | OS 级沙箱、评估 harness、OpenTelemetry / Langfuse | — |
 | 4 | 生产级:Rust 热点路径、单文件分发、LiteLLM Proxy | — |
+
+完整任务级拆解(每个 milestone 的产出 + 验收标准)见 [`docs/roadmap.md`](docs/roadmap.md)。
 
 ## Quick start
 

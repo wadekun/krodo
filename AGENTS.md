@@ -384,7 +384,8 @@ M7 closed out Phase 1. The work happened in five independent commits, each indep
 
 | Doc | Path | Audience |
 |-----|------|---------|
-| Project overview + roadmap | `README.md` | everyone |
+| Project overview + phase-level roadmap | `README.md` (+ `README.zh-CN.md`) | everyone |
+| Task-level roadmap (deliverables + acceptance per milestone) | `docs/roadmap.md` | contributors |
 | 5-minute install | `docs/QUICKSTART.md` | new users |
 | Design baseline (source of truth) | `docs/architecture.md` | contributors |
 | Auto-loaded project memory | `AGENTS.md` (this file) | krodo + contributors |
@@ -480,6 +481,21 @@ against *future* native regressions, not a substitute for the pin.
 `SymbolBackend.close()` is called at every point a session stops owning an
 indexer (`_run_headless` end, both exits of `repl_session_cycle`) to avoid
 leaking the SQLite connection.
+
+## Documentation maintenance
+
+Four places track progress/changes; each has a **different trigger** — do not
+duplicate content across them:
+
+| Doc | Trigger | Grain |
+|---|---|---|
+| `CHANGELOG.md` `[Unreleased]` | every feature/fix PR (same PR as the code) | per-change |
+| `docs/roadmap.md` | milestone closes | per-task (2.x), incl. acceptance deviations |
+| `README.md` + `README.zh-CN.md` (status line + Roadmap table) | **phase** changes only (not per-milestone) | per-phase — keep both files in sync |
+| `AGENTS.md` (this file) | milestone closes | implementation summary, 8K token budget |
+
+**Before closing a milestone**, check all four. Missing `docs/roadmap.md` /
+`README.md` updates is the most common gap (M8/M9 both slipped through once).
 
 ## When you (the agent) modify this codebase
 
