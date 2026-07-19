@@ -20,7 +20,7 @@ Design notes (see ``docs/reviews/m9_plan_review.md`` — review A):
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol, runtime_checkable
@@ -122,5 +122,43 @@ class SymbolBackend(Protocol):
         (headless exit, REPL exit, and before rebuilding components on
         ``:resume``). Idempotent implementations are encouraged but not
         required — callers only call this once per instance.
+        """
+        ...
+
+
+@runtime_checkable
+class IterableSymbolBackend(Protocol):
+    """Bulk-enumeration interface consumed by M10 repo-map.
+
+    Deliberately distinct from :class:`SymbolBackend` (which is query-shaped):
+    full-index enumeration is a tree-sitter-specific affordance. A future LSP
+    backend can satisfy ``SymbolBackend`` queries cheaply but cannot enumerate
+    the whole workspace without walking every file, so enumeration stays off
+    the query Protocol. ``memory.repo_map`` depends on this Protocol (not the
+    concrete ``TreeSitterSymbolIndex``) so it remains testable with a fake
+    backend (engineering rule #2 — Protocol first).
+
+    Implementations MUST enumerate in a **deterministic order**
+    (``ORDER BY path, line, name``). Repo-map output is byte-stable across
+    renders — a prompt-cache invariant — and any order drift propagates
+    through graph construction into the PageRank float-summation order and
+    thence into the rendered text.
+    """
+
+    def iter_symbols(self) -> Iterator[SymbolDef]:
+        """Yield every indexed definition, ordered by (path, line, name)."""
+        ...
+
+    def iter_refs(self) -> Iterator[SymbolRef]:
+        """Yield every indexed reference, ordered by (path, line, name)."""
+        ...
+
+    @property
+    def version(self) -> int:
+        """Monotonic counter bumped whenever index content may have changed
+        (build / re-extract / delete / invalidate). Readers compare it to
+        detect "no change since last render" without re-reading rows; a bump
+        is optimistic (may fire even when the re-extract is byte-identical),
+        so callers that need cache stability must still byte-compare.
         """
         ...

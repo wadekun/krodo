@@ -24,7 +24,7 @@ import logging
 import os
 import sqlite3
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from krodo.indexer.base import IndexStats, SymbolDef, SymbolRef
@@ -85,6 +85,11 @@ class TreeSitterSymbolIndex:
         # only: a fresh process always runs ``build_full`` at startup, so there
         # is no cross-process staleness window.
         self._dirty: set[str] = set()
+        # Monotonic content-revision counter (M10 repo-map version gate).
+        # Bumped on invalidate (optimistic) and whenever rows are written or
+        # deleted (_store_file / _delete_file); stable across no-op builds so
+        # repo-map can skip a re-render by comparing this alone.
+        self._version: int = 0
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(db_path))
         self._conn.row_factory = sqlite3.Row
@@ -108,6 +113,43 @@ class TreeSitterSymbolIndex:
 
     def close(self) -> None:
         self._conn.close()
+
+    # ------------------------------------------------------------------
+    # IterableSymbolBackend — bulk enumeration + version (M10 repo-map)
+    # ------------------------------------------------------------------
+
+    @property
+    def version(self) -> int:
+        return self._version
+
+    def iter_symbols(self) -> Iterator[SymbolDef]:
+        """Yield every definition, ordered by (path, line, name).
+
+        Flushes pending invalidations first so the enumeration reflects writes
+        from the current turn. Ordering is a hard contract (see
+        :class:`~krodo.indexer.base.IterableSymbolBackend`) — repo-map
+        byte-stability depends on it.
+        """
+        self._flush_dirty()
+        rows = self._conn.execute(
+            "SELECT path, line, name, kind, signature FROM symbols ORDER BY path, line, name"
+        )
+        for r in rows:
+            yield SymbolDef(
+                path=r["path"],
+                line=r["line"],
+                name=r["name"],
+                kind=r["kind"],
+                signature=r["signature"],
+                backend=self.backend,
+            )
+
+    def iter_refs(self) -> Iterator[SymbolRef]:
+        """Yield every reference, ordered by (path, line, name)."""
+        self._flush_dirty()
+        rows = self._conn.execute("SELECT path, line, name FROM refs ORDER BY path, line, name")
+        for r in rows:
+            yield SymbolRef(path=r["path"], line=r["line"], name=r["name"], backend=self.backend)
 
     # ------------------------------------------------------------------
     # SymbolBackend — queries
@@ -182,6 +224,11 @@ class TreeSitterSymbolIndex:
             rel = self._normalize_rel(path)
             if rel is not None:
                 self._dirty.add(rel)
+                # Optimistic version bump: a write may have changed content, so
+                # the next repo-map refresh must re-render even if no query has
+                # flushed the dirty file yet (otherwise the map lags a turn).
+                # The render's byte-compare absorbs "write didn't change map".
+                self._version += 1
 
     # ------------------------------------------------------------------
     # Build / reconcile
@@ -312,9 +359,11 @@ class TreeSitterSymbolIndex:
                 "INSERT INTO refs (path, line, name) VALUES (?, ?, ?)",
                 [(rel_path, r.line, r.name) for r in refs],
             )
+        self._version += 1  # content written → repo-map must re-render
 
     def _delete_file(self, rel_path: str) -> None:
         self._conn.execute("DELETE FROM files WHERE path = ?", (rel_path,))
+        self._version += 1  # content removed → repo-map must re-render
 
     def _prune_missing(self, seen: set[str]) -> None:
         rows = self._conn.execute("SELECT path FROM files").fetchall()
