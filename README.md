@@ -10,7 +10,7 @@
 
 > A local-first, multi-provider **coding agent CLI**, built with Python 3.12+.
 >
-> Status: 🚧 **Pre-alpha (v0.1.1)** — Phase 1 feature-complete & on PyPI (REPL + headless + pipe, 11 tools, JSONL sessions, three approval modes). Phase 2 (TUI, MCP client, tree-sitter symbol index) in planning.
+> Status: 🚧 **Pre-alpha (v0.1.1)** — Phase 1 feature-complete & on PyPI (REPL + headless + pipe, 11 tools, JSONL sessions, three approval modes). Phase 2 in progress — tree-sitter symbol index, provider-matrix CI, and Anthropic prompt caching shipped; repo-map, Textual TUI, and MCP client next.
 
 Krodo is an open-source coding agent inspired by Claude Code, Codex CLI, and Aider. It runs locally, talks to your codebase through tools (read / edit / shell / git / grep), and supports any LLM provider via [LiteLLM](https://github.com/BerriAI/litellm) — Anthropic, OpenAI, Gemini, DeepSeek, Qwen, plus local models via Ollama / vLLM.
 
@@ -29,16 +29,12 @@ For full design rationale, see [`docs/architecture.md`](docs/architecture.md).
 | Phase | Scope | Status |
 |------:|:------|:------:|
 | 0 | Single-file prototype validating the ReAct loop | ✅ done |
-| 1 M1 | Walking skeleton (3 tools, CLI, agent loop) | ✅ done |
-| 1 M2 | Full tools (11 tools) + three approval modes + pattern trust | ✅ done |
-| 1 M3 | Context management (token budget + dual compression) + 7 recovery scenarios | ✅ done |
-| 1 M4 | `.krodoignore` + git checkpoint + `krodo undo` + diff preview | ✅ done |
-| 1 M5 | Persistence + memory: JSONL sessions, `krodo resume`, AGENTS.md, config files | ✅ done |
-| 1 M6 | Streaming + cost tracking + pipe stdin + REPL slash commands + approval persistence | ✅ done |
-| 1 M7 | Brand rename (Coda → krodo) + mypy strict clean + docs quartet + GitHub release + dogfood PR | ✅ done |
-| 2 | tree-sitter symbol index, repo-map, Textual TUI, MCP client | — |
+| 1 | Usable CLI MVP: REPL + headless + pipe, 11 tools, three approval modes, JSONL sessions, AGENTS.md memory — released as v0.1.1 on PyPI | ✅ done |
+| 2 | Deeper code understanding: tree-sitter symbol index, repo-map, Textual TUI, MCP client | 🚧 in progress |
 | 3 | OS-level sandbox, evaluation harness, OpenTelemetry / Langfuse | — |
 | 4 | Production-grade: Rust hot paths, single-binary distribution, LiteLLM Proxy | — |
+
+See [`docs/roadmap.md`](docs/roadmap.md) for the full task-level breakdown (deliverables + acceptance criteria per milestone).
 
 ## Quick start
 
