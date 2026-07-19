@@ -6,8 +6,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 
-from krodo.core.config import KrodoConfig, load_config
+from krodo.core.config import KrodoConfig, load_config, resolve_symbol_backend
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -171,3 +172,60 @@ class TestSources:
         # user TOML is lower priority → listed first
         assert "config.toml" in sources[0]
         assert "config.yaml" in sources[1]
+
+
+# ---------------------------------------------------------------------------
+# 7. symbol_backend validation matrix (M9)
+# ---------------------------------------------------------------------------
+
+
+class TestSymbolBackend:
+    """Cover the str | list[str] | None schema and the review-C matrix."""
+
+    def test_none_is_default(self) -> None:
+        cfg = KrodoConfig()
+        assert cfg.symbol_backend is None
+
+    @pytest.mark.parametrize("value", ["treesitter", ["treesitter"]])
+    def test_treesitter_accepted(self, value: object) -> None:
+        assert KrodoConfig(symbol_backend=value).symbol_backend == value  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("value", ["off", ["off"]])
+    def test_off_accepted(self, value: object) -> None:
+        assert KrodoConfig(symbol_backend=value).symbol_backend == value  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("value", ["lsp", ["lsp"], ["lsp", "treesitter"]])
+    def test_lsp_friendly_error(self, value: object) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            KrodoConfig(symbol_backend=value)  # type: ignore[arg-type]
+        assert "Phase 3" in str(exc_info.value)
+
+    def test_empty_list_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            KrodoConfig(symbol_backend=[])
+
+    def test_unknown_value_rejected(self) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            KrodoConfig(symbol_backend="rust-analyzer")
+        assert "legal: treesitter, off" in str(exc_info.value)
+
+    def test_cannot_combine_treesitter_and_off(self) -> None:
+        with pytest.raises(ValidationError):
+            KrodoConfig(symbol_backend=["treesitter", "off"])
+
+    def test_wrong_type_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            KrodoConfig(symbol_backend=42)  # type: ignore[arg-type]
+
+
+class TestResolveSymbolBackend:
+    def test_none_defaults_to_treesitter(self) -> None:
+        assert resolve_symbol_backend(None) == "treesitter"
+
+    @pytest.mark.parametrize("value", ["treesitter", ["treesitter"]])
+    def test_treesitter_forms(self, value: object) -> None:
+        assert resolve_symbol_backend(value) == "treesitter"  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("value", ["off", ["off"]])
+    def test_off_forms(self, value: object) -> None:
+        assert resolve_symbol_backend(value) == "off"  # type: ignore[arg-type]

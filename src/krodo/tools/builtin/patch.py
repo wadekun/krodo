@@ -66,6 +66,11 @@ class ApplyPatchTool:
                         },
                     )
         result_text = self._apply(params, ctx)
+        # M9: invalidate the symbol index for every file the patch touched.
+        # Reuses the same affected-paths list already gathered for the
+        # checkpoint (review E).
+        if ctx.indexer is not None and affected and not result_text.startswith("ERROR"):
+            ctx.indexer.invalidate(affected)
         return ToolResult(
             tool_call_id="",
             content=result_text,

@@ -396,6 +396,91 @@ M7 closed out Phase 1. The work happened in five independent commits, each indep
 
 The initial rename commit (`295ce49`) ran perl 3-case replacement on a hardcoded list of files (`pyproject` / `README` / `AGENTS` / `architecture` / `ci.yml` / `.krodoignore`). That missed `.gitignore`, `LICENSE`, and the on-disk `.coda/` directory — caught only after CI failed on the first GitHub push. For future full-repo renames, use `rg -l 'pattern'` to enumerate every hit first, then exclude historical archives and intentional references.
 
+## Phase 2 M9: tree-sitter symbol index
+
+A symbol-level data foundation for codebase understanding. `src/krodo/indexer/`
+extracts definitions/references via tree-sitter (Python / JavaScript /
+TypeScript / Go) and stores them in a SQLite index that M10 (repo-map) and M11
+(symbol tools) will consume. M9 ships only the data layer — it does **not**
+register any tools or render a repo-map.
+
+### Module map
+
+- `indexer/base.py` — `SymbolBackend` Protocol (`find_symbol` /
+  `find_references` / `stats` / `invalidate`) + frozen `SymbolDef` /
+  `SymbolRef` / `IndexStats`. `SymbolDef.backend` records the producing
+  backend; `precision` is reserved for the Phase 3 LSP backend (`"semantic"`),
+  `"syntactic"` for tree-sitter.
+- `indexer/extract.py` — single-file extraction (extension → grammar →
+  Aider-style tag query); isolated `_extract_signature` (definition-line,
+  multi-line truncated with `…`); robust (1 MB cap, NUL/binary skip, utf-8
+  `errors="replace"`, error-tolerant).
+- `indexer/symbol_index.py` — `TreeSitterSymbolIndex` (the one `SymbolBackend`
+  impl): SQLite **WAL**, workspace-relative paths, mtime+size freshness with
+  lazy sha256, write-hook `invalidate` via a dirty set flushed before each
+  query, query-time refresh of hit files only (never a full scan on query).
+- `indexer/queries/*.scm` — vendored from Aider (commit pinned in
+  `THIRD_PARTY_NOTICES.md`); one local modification noted (Python
+  module-level constant pattern).
+
+### Configuration
+
+`symbol_backend` in `.krodo/config.yaml` (no CLI flag):
+
+| Value | Behaviour |
+|-------|-----------|
+| unset / `"treesitter"` / `["treesitter"]` | index on (default) |
+| `"off"` / `["off"]` | no index, `ToolContext.indexer` is `None` |
+| any form containing `"lsp"` | friendly error — LSP is Phase 3 |
+
+Schema is `str | list[str]` so the Phase 3 fallback chain (e.g.
+`[lsp, treesitter]`) needs no type change, only a relaxed validator.
+
+### Session wiring
+
+At session start (`cli/main.py`), when enabled, the index is built once
+(`build_full`, incremental across sessions via stored mtime+size) and injected
+into `ToolContext.indexer`. An `INDEX_BUILD` event is emitted to the session
+JSONL; `krodo doctor` shows the index stats; both `INDEX_BUILD` and
+`INDEX_UPDATE` replay as no-ops on resume.
+
+### Write-tool invalidation (the acceptance-critical path)
+
+`write_file` / `edit_file` / `apply_patch` call `ctx.indexer.invalidate(paths)`
+after a successful write (None-safe). The index does **not** rebuild — it marks
+the path dirty and re-extracts that single file on the next query, so a renamed
+symbol is visible immediately. `apply_patch` reuses the same affected-paths list
+already gathered for the checkpoint.
+
+### Native crash lesson + canary defense (M9 closeout)
+
+The default-on symbol index almost shipped with a **process-killing**
+dependency bug: `tree-sitter` 0.26.0 has a `Point.row`/`Point.column`
+reference-counting bug (py-tree-sitter#466, merged upstream but unreleased)
+that frees the backing int too early; enough non-cached (>256) `Point` reads
+in one process — exactly what parsing any real multi-symbol file does —
+reuses the freed memory and segfaults (SIGSEGV). Reproduced deterministically
+across macOS arm64 / Linux arm64 / Linux amd64 (~40% of real-world files).
+Root cause took two attribution corrections to pin down ("language-pack
+grammar ABI" → "tree-sitter 0.26 query engine" → the actual `Point` refcount
+UAF) — full diagnosis in `docs/benchmarks/m9_symbol_index_perf_results.md`.
+
+Fix: `pyproject.toml` pins `tree-sitter>=0.25,<0.26` (relax to `<0.27` once
+py-tree-sitter ships a release containing #466, re-verified via
+`docs/benchmarks/m9_symbol_index_perf.md`'s `scan.py`). Since `symbol_backend`
+defaults on, this was a **general new-install crash**, not a platform-specific
+edge case.
+
+Defense-in-depth: `indexer/canary.py` runs a subprocess probe — parsing the
+first ~16 real source files hit while walking the workspace — before
+`build_full()` ever touches tree-sitter in-process. A crashing probe disables
+the index for the session (same UX as `symbol_backend: off`) instead of
+letting the same crash kill the whole session. Best-effort only: it guards
+against *future* native regressions, not a substitute for the pin.
+`SymbolBackend.close()` is called at every point a session stops owning an
+indexer (`_run_headless` end, both exits of `repl_session_cycle`) to avoid
+leaking the SQLite connection.
+
 ## When you (the agent) modify this codebase
 
 - Always `read_file` before `edit_file` — never guess file contents.

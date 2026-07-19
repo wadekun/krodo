@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     import logging
 
     from krodo.core.workspace import Workspace
+    from krodo.indexer.base import SymbolBackend
     from krodo.sandbox.checkpoint import GitCheckpointManager
     from krodo.sandbox.ignore import KrodoIgnore
     from krodo.sandbox.protocols import SandboxRunner
@@ -67,6 +68,10 @@ class ToolContext:
     ignore: KrodoIgnore = field(default_factory=_default_ignore)
     checkpoint: GitCheckpointManager = field(default_factory=_default_checkpoint)
     event_logger: object | None = None  # SessionEventLogger injected by CLI
+    # M9: symbol index (None when symbol_backend == "off" or in legacy tests).
+    # Tools reference this only through the SymbolBackend Protocol, never the
+    # concrete TreeSitterSymbolIndex, so there is no tools→impl dependency.
+    indexer: SymbolBackend | None = None
 
 
 @runtime_checkable

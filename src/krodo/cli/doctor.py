@@ -147,6 +147,30 @@ async def _async_doctor(
     )
 
     # ----------------------------------------------------------------
+    # Symbol index (M9) — read-only stats from the session-built database.
+    # ----------------------------------------------------------------
+    _index_db = _workspace_root / ".krodo" / "index" / "symbols.db"
+    console.print("[bold]symbol index[/bold]")
+    if _index_db.exists():
+        try:
+            from krodo.indexer import TreeSitterSymbolIndex  # noqa: PLC0415
+
+            with TreeSitterSymbolIndex(_index_db, _workspace_root) as _idx:
+                _ist = _idx.stats()
+            idx_grid = Table.grid(padding=(0, 2))
+            idx_grid.add_row("  backend", _ist.backend)
+            idx_grid.add_row("  files", f"{_ist.files_indexed:,}")
+            idx_grid.add_row("  symbols", f"{_ist.symbols:,}")
+            idx_grid.add_row("  references", f"{_ist.references:,}")
+            idx_grid.add_row("  last build", f"{_ist.build_ms} ms")
+            console.print(idx_grid)
+        except Exception as exc:  # noqa: BLE001 — doctor stays best-effort
+            console.print(f"[dim]  (unreadable: {exc})[/dim]")
+    else:
+        console.print("[dim]  (not built — run a krodo session to index this workspace)[/dim]")
+    console.print()
+
+    # ----------------------------------------------------------------
     # 1-token ping
     # ----------------------------------------------------------------
     console.print("[dim]Sending 1-token ping…[/dim]")

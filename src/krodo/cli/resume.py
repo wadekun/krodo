@@ -71,10 +71,12 @@ def resume_command(
     # fields (model / api_key / max_tokens / ...) are still sourced from
     # Typer defaults on the resume subcommand — extending full config.yaml
     # support here is a separate cleanup, tracked outside M8.
-    from krodo.core.config import load_config  # noqa: PLC0415
+    from krodo.core.config import load_config, resolve_symbol_backend  # noqa: PLC0415
 
     cfg, _cfg_sources = load_config(workspace_root)
     prompt_cache_value = cfg.prompt_cache if cfg.prompt_cache is not None else True
+    # M9: same config-driven resolution for the symbol index backend.
+    symbol_backend_value = resolve_symbol_backend(cfg.symbol_backend)
 
     # --list: print recent sessions and exit
     if list_recent:
@@ -115,6 +117,7 @@ def resume_command(
                 max_tokens=max_tokens,
                 resume_session_id=target_id,
                 prompt_cache=prompt_cache_value,
+                symbol_backend=symbol_backend_value,
             )
 
         components = build_resumed_components(resolved_id, _rebuild)
@@ -192,6 +195,11 @@ async def repl_session_cycle(
     current = components
     while True:
         target = await run_repl(current)
+        # M9: close the symbol index (DB connection) whenever we're done with
+        # `current` — either the REPL exited for good, or `:resume` is about
+        # to swap in a freshly-built `SessionComponents` for `target`.
+        if current.indexer is not None:
+            current.indexer.close()
         if target is None:
             return
         current = build_resumed_components(target, rebuild)

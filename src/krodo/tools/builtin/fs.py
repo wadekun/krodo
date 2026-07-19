@@ -170,6 +170,10 @@ class WriteFileTool:
                 )
 
         result_text = self._write(params, ctx, target)
+        # M9: invalidate the symbol index for the written file so the next
+        # query re-extracts it (path is normalised to relative by the index).
+        if ctx.indexer is not None and not result_text.startswith("ERROR"):
+            ctx.indexer.invalidate([target])
         return ToolResult(
             tool_call_id="",
             content=result_text,
@@ -253,6 +257,9 @@ class EditFileTool:
                 )
 
         result_text = self._edit(params, ctx, target)
+        # M9: invalidate the symbol index for the edited file.
+        if ctx.indexer is not None and not result_text.startswith("ERROR"):
+            ctx.indexer.invalidate([target])
         return ToolResult(
             tool_call_id="",
             content=result_text,

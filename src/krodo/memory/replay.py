@@ -12,7 +12,8 @@ Mapping table (see M5.2 spec):
   TOOL_CALL         → skip (already embedded in ASSISTANT_MESSAGE data)
   APPROVAL_DECISION → re-apply the latest trust ``state`` snapshot to the
                       approval manager when one is passed (M6.5)
-  CHECKPOINT / UNDO / ERROR / SESSION_INIT / COST_SNAPSHOT
+  CHECKPOINT / UNDO / ERROR / SESSION_INIT / COST_SNAPSHOT /
+  INDEX_BUILD / INDEX_UPDATE
                     → skip (metadata only)
 """
 
@@ -182,7 +183,7 @@ def replay_events(
                 last_approval_state = state
 
         # All other event types (TOOL_CALL, CHECKPOINT, UNDO, ERROR,
-        # COST_SNAPSHOT) are metadata-only — skip.
+        # COST_SNAPSHOT, INDEX_BUILD, INDEX_UPDATE) are metadata-only — skip.
 
     _flush_pending()
 
