@@ -36,11 +36,35 @@ once v0.1.0 is tagged.
   `apply_patch` invalidate the index for the files they touch after a
   successful write; the next query re-extracts only those files, so a renamed
   symbol is visible immediately without a rebuild.
+- **Repo-map context injection** (Phase 2 M10). New `src/krodo/memory/repo_map.py`
+  builds an Aider-style file reference graph from the M9 symbol index (edges:
+  referencing file → defining file, name-based approximation), ranks files
+  with a handwritten deterministic PageRank, and renders a directory-grouped
+  signature tree into a token budget. The map is injected as a `<repo_map>`
+  context message right after `<project_memory>` and refreshed before each
+  turn only when the index actually changed (monotonic index `version` gate;
+  byte-identical re-renders keep the old bytes to preserve the prompt cache).
+  New config keys: `repo_map` (default on when the index is on) and
+  `repo_map_tokens` (default 2048). Perf: ha-core (18k files / 176k symbols /
+  644k refs) renders in ~3s, the krodo repo itself in 29ms; renders fire only
+  on index change.
+- **Second Anthropic cache breakpoint on the stable prefix** (Phase 2 M10).
+  `LiteLLMProvider` now also tags the last stable-prefix message (`<repo_map>`
+  when present, else `<project_memory>`) with `cache_control`, so the whole
+  static prefix — system prompt + AGENTS.md memory + repo-map — caches as one
+  unit instead of only the system message.
 
 ### Changed
 - (No unreleased changes.)
 
 ### Fixed
+- **`<project_memory>` no longer evicted under context pressure** (Phase 2 M10).
+  Compression pinning claimed to protect the project-memory message but never
+  did: after the first real user turn it could be folded into an LLM summary,
+  and the hard-truncation fallback unconditionally popped the oldest message —
+  dropping `<project_memory>` first. `_pinned_ids` and hard truncation now
+  both protect the stable prefix (`<project_memory>` / `<repo_map>`), evicting
+  the oldest non-prefix message instead.
 - **`tree-sitter` pinned to `<0.26`** (Phase 2 M9). `tree-sitter` 0.26.0 has a
   `Point.row`/`Point.column` reference-counting bug ([py-tree-sitter#466](https://github.com/tree-sitter/py-tree-sitter/pull/466),
   merged upstream but not yet released) that frees the backing int too early;

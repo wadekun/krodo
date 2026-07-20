@@ -358,12 +358,12 @@ M7 closed out Phase 1. The work happened in five independent commits, each indep
 
 | Commit | Type | What |
 |--------|------|------|
-| `ce24ef6` | `fix(mypy)` | cleared 10 mypy `--strict` errors (`types-PyYAML` stubs + streaming `int(object)` overloads + bare `dict`/`list` generics in CLI helpers + 2 stale `# type: ignore`) |
-| `295ce49` | `feat(rename)` | full rebrand `Coda → krodo`: `src/coda/` → `src/krodo/`, ~826 coda/Coda/CODA references across 84+ files (perl 3-case replace), pyproject 5 fields, `.codaignore` → `.krodoignore`, all docs/AGENTS/README/architecture |
-| `0c5c607` | `docs` | QUICKSTART / CONTRIBUTING / SECURITY / CHANGELOG + README polish (4 badges, doc table, PyPI-deferred notice) |
-| `634d051` | `fix(rename)` | cleanup residuals missed by initial perl pass: `.gitignore` patterns + LICENSE copyright holder + physical `.coda/` → `.krodo/` directory on disk |
-| `05a82bd` | `fix(ci)` | ruff format backfill (10 pre-existing files) + correct repo owner `liangck` → `wadekun` across all docs |
-| `90aa414` (PR #1 merge) | merge | M7 dogfood: krodo fixed its own `checkpoint_skipped` warning noise (non-git workspaces now warn once per session, then debug) — `836d829` |
+| `ce24ef6` | `fix(mypy)` | cleared 10 mypy `--strict` errors |
+| `295ce49` | `feat(rename)` | full rebrand `Coda → krodo` (~826 refs, 84+ files) |
+| `0c5c607` | `docs` | QUICKSTART / CONTRIBUTING / SECURITY / CHANGELOG + README polish |
+| `634d051` | `fix(rename)` | residuals: `.gitignore`, LICENSE, on-disk `.coda/` → `.krodo/` |
+| `05a82bd` | `fix(ci)` | ruff format backfill + repo owner `liangck` → `wadekun` |
+| `90aa414` (PR #1) | merge | M7 dogfood: krodo fixed its own `checkpoint_skipped` warning noise |
 
 ### Why the rename
 
@@ -481,6 +481,37 @@ against *future* native regressions, not a substitute for the pin.
 `SymbolBackend.close()` is called at every point a session stops owning an
 indexer (`_run_headless` end, both exits of `repl_session_cycle`) to avoid
 leaking the SQLite connection.
+
+## Phase 2 M10: repo-map injection
+
+Aider-style workspace overview injected into every session, built from the
+M9 index (no re-parsing).
+
+- `indexer/base.py` — `IterableSymbolBackend` Protocol (`iter_symbols` /
+  `iter_refs` / `version`). **Enumeration order is a hard contract**
+  (`ORDER BY path, line, name`): order drift propagates via graph build →
+  PageRank float summation → rendered bytes; byte-stability is a
+  prompt-cache prerequisite.
+- `memory/repo_map.py` — `build_graph` (name-based edges, 1/n split;
+  self-loops and >10-def ambiguous names dropped), handwritten deterministic
+  `pagerank` (fixed 30 iters, O(edges)/iter), `render_map` (signature tree,
+  greedy fill to `repo_map_tokens`). ha-core ~3s, krodo 29ms.
+- **Injection**: `<repo_map>` user message at `_history[1]` after
+  `<project_memory>`. Config: `repo_map` (default on), `repo_map_tokens`
+  (default 2048). `REPO_MAP` event is metadata-only; on resume the map is
+  re-derived from the index.
+- **Refresh** (`RepoMapManager`, from CLI before each `loop.run`): index
+  `version` gates re-renders; byte-identical re-renders keep the old bytes.
+  `version` is read **after** rendering (`iter_*` flushes mid-render).
+- **Prompt cache**: second `cache_control` breakpoint on the last
+  stable-prefix message → [system, project_memory, repo_map] caches as one
+  unit for `anthropic/*`.
+- **Compression/truncation**: `is_prefix_message()` pins the prefix; hard
+  truncation evicts oldest **non-prefix** message (fixed the pre-existing
+  `<project_memory>`-dropped-first bug).
+- Limits: out-of-band edits don't bump `version` (map stale until next
+  session; real reads use `read_file`); "+20% success rate" acceptance
+  deferred to the Phase 3 eval harness.
 
 ## Documentation maintenance
 
