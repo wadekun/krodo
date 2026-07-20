@@ -77,14 +77,25 @@ def _last_user_message(messages: list[Message]) -> Message | None:
     return None
 
 
+def is_prefix_message(msg: Message) -> bool:
+    """True for stable-prefix context messages (``<project_memory>``, ``<repo_map>``).
+
+    These are injected at the head of history and must survive compression and
+    hard-truncation — dropping ``<project_memory>`` loses project context
+    mid-session, and dropping ``<repo_map>`` breaks prompt-cache byte-stability.
+    """
+    return isinstance(msg.content, str) and (
+        msg.content.startswith("<project_memory>") or msg.content.startswith("<repo_map>")
+    )
+
+
 def _pinned_ids(messages: list[Message]) -> set[int]:
     """Return the set of *id()* values for messages that must not be compressed.
 
     Always pins:
     - The system prompt (index 0).
+    - Stable-prefix messages (``<project_memory>`` / ``<repo_map>``).
     - The most-recent user message.
-    - Messages that contain pinned file paths (heuristic: assistant messages
-      referencing pinned paths).
     """
     pinned: set[int] = set()
 
@@ -93,6 +104,11 @@ def _pinned_ids(messages: list[Message]) -> set[int]:
         if msg.role == "system":
             pinned.add(id(msg))
             break
+
+    # Stable prefix messages — never compress (M10).
+    for msg in messages:
+        if is_prefix_message(msg):
+            pinned.add(id(msg))
 
     # Most-recent user message
     last_user = _last_user_message(messages)

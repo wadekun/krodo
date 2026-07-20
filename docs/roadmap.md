@@ -92,6 +92,17 @@ LiteLLM tool-use 与审批 UX。
   过程详见同一份 benchmark 文档。
 - **2.2 repo-map 注入** — 产出:Aider 式 PageRank repo-map 拼到 system
   prompt ｜ 验收:跨文件重构任务成功率较 Phase 1 baseline +20%。
+  ✅ **M10 交付**,注入位置与验收范围有调整:`src/krodo/memory/repo_map.py`
+  (基于 M9 索引建文件引用图 + 手写确定性 PageRank + 签名树渲染,token 预算
+  默认 2048)。map **不拼 system prompt**,而是作为 `<repo_map>` user 消息注
+  入 `_history[1]`(紧跟 `<project_memory>`),配合第二个 Anthropic cache 断
+  点让整段稳定前缀命中缓存;每轮刷新走索引 version gate(索引没变零成本,
+  ha-core 全量渲染 ~3s / krodo 29ms)。压缩与硬截断均保护稳定前缀(顺手修
+  了 `<project_memory>` 被硬截断先丢的既有 bug)。**验收偏离**:"+20% 成功
+  率"需要评估 harness(Phase 3)做 baseline 对比,本 milestone 以确定性/预
+  算/缓存断点/压缩保护的单测 + 集成测试(830 passed)+ 真实仓库 dogfood 代
+  替。已知裁剪:krodo 之外的外部编辑不 bump 索引 version,map 滞后到下次
+  session(map 只做定向,实读靠 `read_file` 兜底)。
 - **2.3 新工具** — `find_symbol` / `find_references` / `apply_patch v2`(多
   文件原子)｜ 验收:失败可整体回滚。
 - **2.4 Textual TUI** — 产出:任务面板 + 实时 diff + 流式日志 + 多 session

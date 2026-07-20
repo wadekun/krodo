@@ -289,6 +289,23 @@ class LiteLLMProvider:
             and litellm_messages[0].get("role") == "system"
         ):
             litellm_messages[0]["cache_control"] = {"type": "ephemeral"}
+            # Second breakpoint (Anthropic allows ≤4) on the LAST stable-prefix
+            # message — <repo_map> if present, else <project_memory> — so the
+            # whole static prefix (system + AGENTS.md memory + repo-map) caches
+            # as one unit. The prefix is the leading run of system + user
+            # messages whose content starts with <project_memory>/<repo_map>;
+            # the first real turn message ends it.
+            last_prefix = 0
+            for i in range(1, len(litellm_messages)):
+                content = litellm_messages[i].get("content")
+                if isinstance(content, str) and (
+                    content.startswith("<project_memory>") or content.startswith("<repo_map>")
+                ):
+                    last_prefix = i
+                else:
+                    break
+            if last_prefix > 0:
+                litellm_messages[last_prefix]["cache_control"] = {"type": "ephemeral"}
 
         kwargs: dict[str, Any] = {
             "model": self.model,

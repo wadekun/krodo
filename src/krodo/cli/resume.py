@@ -71,12 +71,20 @@ def resume_command(
     # fields (model / api_key / max_tokens / ...) are still sourced from
     # Typer defaults on the resume subcommand — extending full config.yaml
     # support here is a separate cleanup, tracked outside M8.
-    from krodo.core.config import load_config, resolve_symbol_backend  # noqa: PLC0415
+    from krodo.core.config import (  # noqa: PLC0415
+        load_config,
+        resolve_repo_map,
+        resolve_repo_map_tokens,
+        resolve_symbol_backend,
+    )
 
     cfg, _cfg_sources = load_config(workspace_root)
     prompt_cache_value = cfg.prompt_cache if cfg.prompt_cache is not None else True
     # M9: same config-driven resolution for the symbol index backend.
     symbol_backend_value = resolve_symbol_backend(cfg.symbol_backend)
+    # M10: repo-map resolution, same pattern.
+    repo_map_value = resolve_repo_map(cfg.repo_map)
+    repo_map_tokens_value = resolve_repo_map_tokens(cfg.repo_map_tokens)
 
     # --list: print recent sessions and exit
     if list_recent:
@@ -118,6 +126,8 @@ def resume_command(
                 resume_session_id=target_id,
                 prompt_cache=prompt_cache_value,
                 symbol_backend=symbol_backend_value,
+                repo_map=repo_map_value,
+                repo_map_tokens=repo_map_tokens_value,
             )
 
         components = build_resumed_components(resolved_id, _rebuild)

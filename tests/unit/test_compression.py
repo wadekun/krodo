@@ -377,3 +377,75 @@ class TestContextManagerWithCompressor:
         ctx.add_user_input("hello")
         event = await ctx.compress_if_needed()
         assert event is None
+
+
+# ---------------------------------------------------------------------------
+# Stable-prefix pinning (M10 PR2③): <project_memory> / <repo_map> survive
+# ---------------------------------------------------------------------------
+
+
+class TestPrefixPinning:
+    def test_prefix_messages_pinned(self) -> None:
+        from krodo.core.compression import is_prefix_message
+
+        pm = _user("<project_memory>\nAGENTS\n</project_memory>")
+        rm = _user("<repo_map>\nmap\n</repo_map>")
+        msgs = [Message(role="system", content=""), pm, rm, _user("real turn")]
+        pinned = _pinned_ids(msgs)
+        assert id(pm) in pinned
+        assert id(rm) in pinned
+        assert is_prefix_message(pm) and is_prefix_message(rm)
+        assert not is_prefix_message(_user("real turn"))
+
+    @pytest.mark.asyncio
+    async def test_algorithmic_compressor_preserves_prefix(self) -> None:
+        """<project_memory>/<repo_map> are pinned → never stubbed to [compressed]."""
+        compressor = AlgorithmicCompressor()
+        pm = _user("<project_memory>\nAGENTS\n</project_memory>")
+        rm = _user("<repo_map>\nmap\n</repo_map>")
+        history = [
+            pm,
+            rm,
+            _user("do it"),
+            _assistant("", tool_calls=[_tc("read_file", "f.py")]),
+            _tool_result("content", call_id="tc0"),
+        ]
+        new_history, _ = await compressor.compress(history, n_rounds=2)
+        # Prefix messages survive verbatim...
+        assert pm in new_history
+        assert rm in new_history
+        # ...and were not turned into [compressed] stubs (they're user-role anyway).
+        assert all(m.content != "[compressed]" for m in (pm, rm))
+
+    @pytest.mark.asyncio
+    async def test_truncation_keeps_prefix_drops_real_messages(self) -> None:
+        """Hard-truncation pops oldest REAL messages, never <project_memory>/<repo_map>."""
+        from krodo.core.budget import BudgetAction, BudgetStatus
+        from krodo.core.context import InMemoryContextManager
+
+        class _AlwaysOver:
+            def check(self, messages: object) -> BudgetStatus:
+                return BudgetStatus(
+                    used_tokens=999,
+                    budget_tokens=1,
+                    fixed_overhead=0,
+                    available_tokens=0,
+                    action=BudgetAction.TRUNCATE,
+                )
+
+        pm = _user("<project_memory>\nAGENTS\n</project_memory>")
+        rm = _user("<repo_map>\nmap\n</repo_map>")
+        ctx = InMemoryContextManager(system_prompt="sys", budget=_AlwaysOver())
+        ctx._history = [  # noqa: SLF001
+            pm,
+            rm,
+            _user("first real turn"),
+            _assistant("reply"),
+            _user("second real turn"),
+            _assistant("reply2"),
+        ]
+        await ctx.compress_if_needed()
+        # Real messages truncated away, but both prefix messages survive.
+        assert pm in ctx._history  # noqa: SLF001
+        assert rm in ctx._history  # noqa: SLF001
+        assert "first real turn" not in {str(m.content) for m in ctx._history}

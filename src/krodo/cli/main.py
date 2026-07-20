@@ -37,7 +37,12 @@ from krodo.cli.resume import register_resume_app
 from krodo.cli.undo import register_undo_app
 from krodo.core.budget import BudgetCalculator, get_context_window
 from krodo.core.compression import make_compressor
-from krodo.core.config import load_config, resolve_symbol_backend
+from krodo.core.config import (
+    load_config,
+    resolve_repo_map,
+    resolve_repo_map_tokens,
+    resolve_symbol_backend,
+)
 from krodo.core.context import InMemoryContextManager
 from krodo.core.events import SessionEventLogger
 from krodo.core.loop import AgentLoop, LoopConfig
@@ -64,6 +69,8 @@ if TYPE_CHECKING:
 
     from krodo.core.loop import TurnResult
     from krodo.indexer.base import SymbolBackend
+    from krodo.indexer.symbol_index import TreeSitterSymbolIndex
+    from krodo.memory.repo_map import RepoMapManager
 
 # Module-level Rich Console for shared rendering (banners, panels, the
 # prompt→response "Thinking…" spinner). Same instance as banner.py / repl.py
@@ -160,6 +167,10 @@ class SessionComponents:
     # M9: symbol index (None when symbol_backend == "off"). Surfaced so the
     # REPL / doctor can read stats without re-opening the database.
     indexer: SymbolBackend | None = None
+    # M10: repo-map refresh state (None when repo_map is off or the index is
+    # empty). refresh_repo_map() uses it to skip re-renders when the index
+    # version is unchanged.
+    repo_map_manager: RepoMapManager | None = None
 
 
 def _collect_written_paths(sessions_path: Path) -> list[str]:
@@ -352,6 +363,11 @@ def main(
     # M9: symbol index backend — config-only (no CLI flag). Defaults to
     # "treesitter" (on); set `symbol_backend: off` to skip building/injecting.
     symbol_backend_value = resolve_symbol_backend(cfg.symbol_backend)
+    # M10: repo-map (config-only). On by default when the index is on;
+    # `repo_map: false` disables the <repo_map> injection. Token budget
+    # defaults to 2048 (independent of the AGENTS.md memory budget).
+    repo_map_value = resolve_repo_map(cfg.repo_map)
+    repo_map_tokens_value = resolve_repo_map_tokens(cfg.repo_map_tokens)
 
     import asyncio  # noqa: PLC0415
 
@@ -378,6 +394,8 @@ def main(
             summary_window=summary_window,
             prompt_cache=prompt_cache_value,
             symbol_backend=symbol_backend_value,
+            repo_map=repo_map_value,
+            repo_map_tokens=repo_map_tokens_value,
         )
         if effective_prompt:
             await _run_headless(effective_prompt, components)
@@ -397,6 +415,8 @@ def main(
                     summary_window=summary_window,
                     prompt_cache=prompt_cache_value,
                     symbol_backend=symbol_backend_value,
+                    repo_map=repo_map_value,
+                    repo_map_tokens=repo_map_tokens_value,
                     resume_session_id=target_id,
                 )
 
@@ -452,7 +472,7 @@ def _build_symbol_index(
     symbol_backend: str,
     event_logger: SessionEventLogger,
     logger: logging.Logger,
-) -> SymbolBackend | None:
+) -> TreeSitterSymbolIndex | None:
     """Construct + build the symbol index, or return ``None`` when disabled.
 
     Emits an ``INDEX_BUILD`` event and prints a one-line status so the user can
@@ -512,6 +532,107 @@ def _build_symbol_index(
     return idx
 
 
+def _build_repo_map_manager(
+    indexer: TreeSitterSymbolIndex | None,
+    repo_map: bool,
+    repo_map_tokens: int,
+    provider: LiteLLMProvider,
+    context_manager: InMemoryContextManager,
+    event_logger: SessionEventLogger,
+) -> RepoMapManager | None:
+    """Render the repo-map once at session start and inject ``<repo_map>``.
+
+    Returns a :class:`RepoMapManager` (for per-turn refresh) when the map is
+    enabled and the index exists — even if the initial render is empty, so a
+    later non-empty render can still be picked up by ``refresh_repo_map``.
+    The message is inserted right after ``<project_memory>`` (slot 1) or at
+    the head of history (slot 0) when there is no project memory.
+    """
+    from rich.console import Console as _Console  # noqa: PLC0415
+
+    from krodo.core.types import Message as _Msg  # noqa: PLC0415
+    from krodo.memory.repo_map import RepoMapManager  # noqa: PLC0415
+
+    if not repo_map or indexer is None:
+        reason = "disabled" if not repo_map else "index off"
+        _Console(stderr=True).print(f"[dim]repo-map: off ({reason})[/dim]")
+        return None
+
+    mgr = RepoMapManager(indexer, repo_map_tokens, provider.count_tokens)
+    text = mgr.initial_render()
+    if text:
+        history = context_manager._history  # noqa: SLF001
+        has_pm = (
+            bool(history)
+            and isinstance(history[0].content, str)
+            and history[0].content.startswith("<project_memory>")
+        )
+        slot = 1 if has_pm else 0
+        history.insert(slot, _Msg(role="user", content=f"<repo_map>\n{text}\n</repo_map>"))
+        mgr.slot = slot
+    rendered = provider.count_tokens(text) if text else 0
+    _emit_repo_map(event_logger, rendered, repo_map_tokens, indexer.version)
+    tag = (
+        f"{rendered} tok / {repo_map_tokens} budget"
+        if text
+        else f"empty index (budget {repo_map_tokens})"
+    )
+    _Console(stderr=True).print(f"[dim]repo-map: on ({tag})[/dim]")
+    return mgr
+
+
+def _emit_repo_map(
+    event_logger: SessionEventLogger, tokens: int, budget: int, version: int
+) -> None:
+    from krodo.core.types import SessionEventType  # noqa: PLC0415
+
+    event_logger.emit(
+        SessionEventType.REPO_MAP,
+        data={"tokens": tokens, "budget": budget, "version": version},
+    )
+
+
+def refresh_repo_map(components: SessionComponents) -> None:
+    """Re-render the repo-map before a turn iff the index changed.
+
+    Version-gated: skips the render entirely when the index version is
+    unchanged since the last render, and skips history mutation when the bytes
+    are identical (preserves the prompt cache). Called from the REPL and
+    headless drivers before each ``loop.run``.
+    """
+    mgr = components.repo_map_manager
+    if mgr is None:
+        return
+    new_text = mgr.render_if_changed()
+    if new_text is None:
+        return  # version unchanged, or re-rendered byte-identical
+    from krodo.core.types import Message as _Msg  # noqa: PLC0415
+
+    history = components.loop.context_manager._history  # noqa: SLF001
+    if new_text == "":
+        # Map became empty (e.g. all symbols removed) — drop the message.
+        if mgr.slot is not None and 0 <= mgr.slot < len(history):
+            history.pop(mgr.slot)
+        mgr.slot = None
+    elif mgr.slot is not None and 0 <= mgr.slot < len(history):
+        history[mgr.slot] = _Msg(role="user", content=f"<repo_map>\n{new_text}\n</repo_map>")
+    else:
+        has_pm = (
+            bool(history)
+            and isinstance(history[0].content, str)
+            and history[0].content.startswith("<project_memory>")
+        )
+        slot = 1 if has_pm else 0
+        history.insert(slot, _Msg(role="user", content=f"<repo_map>\n{new_text}\n</repo_map>"))
+        mgr.slot = slot
+    _emit_repo_map(
+        components.event_logger,
+        mgr.count_fn(new_text) if new_text else 0,
+        mgr.token_budget,
+        mgr.last_version,
+    )
+
+
 def _build_session_components(
     *,
     root: Path | None,
@@ -525,6 +646,8 @@ def _build_session_components(
     resume_session_id: str | None = None,
     prompt_cache: bool = True,
     symbol_backend: str = "treesitter",
+    repo_map: bool = True,
+    repo_map_tokens: int = 2048,
 ) -> SessionComponents:
     """Wire workspace, logger, banner, provider, tools, and AgentLoop.
 
@@ -719,6 +842,12 @@ def _build_session_components(
             f"{bundle.total_tokens:,} tokens ({source_names}){truncation_warn}[/dim]"
         )
 
+    # M10: render + inject the repo-map (<repo_map> at _history[1], right after
+    # <project_memory>). Off when repo_map is False or the index is off/empty.
+    repo_map_manager = _build_repo_map_manager(
+        indexer, repo_map, repo_map_tokens, provider, loop.context_manager, event_logger
+    )
+
     sessions_path = workspace.root / ".krodo" / "sessions" / f"{session_id}.jsonl"
     log_path = Path(str(get_session_log_path(workspace, session_id)))
 
@@ -735,6 +864,7 @@ def _build_session_components(
         cost_tracker=cost_tracker,
         approval=approval_manager,
         indexer=indexer,
+        repo_map_manager=repo_map_manager,
     )
 
 
@@ -754,6 +884,7 @@ async def _run_headless(prompt: str, components: SessionComponents) -> None:
     status = _console.status("[dim]Thinking…[/dim]")
     status.start()
     try:
+        refresh_repo_map(components)  # M10: re-render <repo_map> if index changed
         result = await components.loop.run(prompt, on_first_token=status.stop)
     finally:
         # Idempotent: safe even if on_first_token already stopped it.

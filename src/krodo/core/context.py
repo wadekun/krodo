@@ -120,12 +120,23 @@ class InMemoryContextManager:
 
         # Fallback: hard truncation if still over TRUNCATE threshold
         if status.action == BudgetAction.TRUNCATE:
+            from krodo.core.compression import is_prefix_message
+
             while len(self._history) > 1:
                 messages = self.build_messages()
                 status = self._budget.check(messages)
                 if status.action in (BudgetAction.OK, BudgetAction.COMPRESS):
                     break
-                self._history.pop(0)
+                # Pop the oldest NON-prefix message. Never drop
+                # <project_memory>/<repo_map> — they anchor project context
+                # and the repo-map's prompt-cache byte-stability.
+                pop_idx = next(
+                    (i for i, m in enumerate(self._history) if not is_prefix_message(m)),
+                    None,
+                )
+                if pop_idx is None:
+                    break  # only prefix messages remain — stop rather than evict them
+                self._history.pop(pop_idx)
 
         return compression_event
 

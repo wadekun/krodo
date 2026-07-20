@@ -130,6 +130,9 @@ async def run_repl(components: SessionComponents) -> str | None:
         status = _console.status("[dim]Thinking…[/dim]")
         status.start()
         try:
+            from krodo.cli.main import refresh_repo_map  # noqa: PLC0415
+
+            refresh_repo_map(components)  # M10: re-render <repo_map> if index changed
             result = await components.loop.run(stripped, on_first_token=status.stop)
         except KeyboardInterrupt:
             _console.print("[yellow]Turn cancelled.[/yellow]")

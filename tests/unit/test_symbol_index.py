@@ -332,3 +332,80 @@ def _bump_mtime(path: Path) -> None:
 
 def _bump_mtime_dir(path: Path) -> None:
     os.utime(path, None)
+
+
+# ---------------------------------------------------------------------------
+# IterableSymbolBackend — enumeration order + version counter (M10 PR1)
+# ---------------------------------------------------------------------------
+
+
+def test_iter_symbols_ordered_by_path_line_name(workspace: Path) -> None:
+    """Enumeration must follow the ORDER BY contract (repo-map determinism)."""
+    pkg = workspace / "pkg"
+    pkg.mkdir(exist_ok=True)
+    # mod.py: alpha at line 1, zeta at line 4 (line order within a file).
+    (pkg / "mod.py").write_text(
+        "def alpha():\n    pass\n\n\ndef zeta():\n    pass\n", encoding="utf-8"
+    )
+    # app.py sorts before mod.py by path.
+    (pkg / "app.py").write_text("def beta():\n    pass\n", encoding="utf-8")
+    with _index(workspace) as idx:
+        syms = list(idx.iter_symbols())
+        # Expect ORDER BY path, line, name: app.py beta, mod.py alpha, mod.py zeta
+        assert [(s.path, s.line, s.name) for s in syms] == [
+            ("pkg/app.py", 1, "beta"),
+            ("pkg/mod.py", 1, "alpha"),
+            ("pkg/mod.py", 5, "zeta"),
+        ]
+
+
+def test_iter_refs_ordered(workspace: Path) -> None:
+    (workspace / "pkg").mkdir(exist_ok=True)
+    (workspace / "pkg" / "mod.py").write_text(
+        "def alpha():\n    return 1\ndef beta():\n    return alpha()\n",
+        encoding="utf-8",
+    )
+    (workspace / "pkg" / "app.py").write_text("alpha()\nbeta()\n", encoding="utf-8")
+    with _index(workspace) as idx:
+        refs = list(idx.iter_refs())
+        # ORDER BY path, line, name
+        assert refs == sorted(refs, key=lambda r: (r.path, r.line, r.name))
+
+
+def test_version_bumps_on_build(workspace: Path) -> None:
+    with _index(workspace) as idx:
+        assert idx.version > 0  # build_full stored files → bumped
+
+
+def test_version_stable_on_noop_rebuild(workspace: Path) -> None:
+    with _index(workspace) as idx:
+        v = idx.version
+        idx.build_full()  # nothing changed → no _store_file → no bump
+        assert idx.version == v
+
+
+def test_version_bumps_on_invalidate_without_query(workspace: Path) -> None:
+    """invalidate bumps version optimistically even before any query flushes
+    (so repo-map refresh detects a write on the very next turn)."""
+    with _index(workspace) as idx:
+        v = idx.version
+        idx.invalidate(["pkg/mod.py"])
+        assert idx.version > v  # bumped by invalidate alone
+
+
+def test_version_bumps_on_flush_then_stable(workspace: Path) -> None:
+    with _index(workspace) as idx:
+        idx.invalidate(["pkg/mod.py"])
+        v_after_invalidate = idx.version
+        list(idx.iter_symbols())  # iter flushes dirty → _store_file bumps
+        assert idx.version > v_after_invalidate
+        stable = idx.version
+        list(idx.iter_symbols())  # nothing dirty now → stable
+        assert idx.version == stable
+
+
+def test_satisfies_iterable_symbol_backend_protocol(workspace: Path) -> None:
+    from krodo.indexer.base import IterableSymbolBackend
+
+    with _index(workspace) as idx:
+        assert isinstance(idx, IterableSymbolBackend)
